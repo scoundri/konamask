@@ -1,4 +1,5 @@
 #include "SpeechToText.h"
+#include "TextToSpeech.h"
 #include <cstdint>
 #include <iostream>
 
@@ -64,7 +65,7 @@ int SpeechToText::Run() {
     bool silenceTimerRunning = false;
     auto silenceStart = std::chrono::steady_clock::now();
     
-    // read and process
+    // listen and process
     while (true) {
         PaError err = Pa_ReadStream(stream, buffer.data(), framesPerBuffer);
         if (err && err != paInputOverflowed) break;
@@ -87,8 +88,15 @@ int SpeechToText::Run() {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - silenceStart).count();
             if (elapsed >= SILENCE_TIMEOUT_MS) {
                 // finalize utterance
-                const char* result = vosk_recognizer_final_result(recognizer);
-                std::cout << result << std::endl;
+                j_result = nlohmann::json::parse(vosk_recognizer_final_result(recognizer));
+                // debug output - free to comment out
+                //std::cout << "\n──────────── STT DEBUG ────────────" << std::endl;
+                //const char* result = vosk_recognizer_final_result(recognizer);
+                //std::cout << result << std::endl;
+                
+                if (j_result["text"].get<std::string>().c_str() != "") {
+                    TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
+                }
                 inSpeech = false;
                 silenceTimerRunning = false;
             }

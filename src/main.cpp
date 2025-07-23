@@ -2,9 +2,10 @@
 #include "TextToSpeech.h"
 
 SpeechToText stt; // object declaration
-//TextToSpeech tts;
+TextToSpeech tts;
 
-int main(int argc, char *argv[]){
+int main() {
+
     // developer notice
     std::cout << 
 "\n\n    ##%                       #####             \n"
@@ -34,6 +35,7 @@ int main(int argc, char *argv[]){
     "######%+++++++++#+++%#%####+###%#+              \n"
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
+    tts.Initialize();
     stt.Initialize();
 
 }

@@ -1,9 +1,12 @@
+#pragma once
 #include <iostream>
+#include <nlohmann/json_fwd.hpp>
 #include <vosk_api.h>
 #include <portaudio.h>
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <nlohmann/json.hpp>
 
 class SpeechToText {
 public:
@@ -16,6 +19,7 @@ private:
     VoskModel *model;
     VoskRecognizer *recognizer;
     PaStream *stream;
+    nlohmann::json j_result;
     int framesPerBuffer;
     double sampleRate;
     int Run();

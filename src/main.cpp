@@ -37,5 +37,5 @@ int main() {
     
     tts.Initialize();
     stt.Initialize();
-
+    tts.Shutdown();
 }

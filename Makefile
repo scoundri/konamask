@@ -3,10 +3,10 @@ CXX       := g++
 PKG_CONFIG:= pkg-config
 
 # --- flags ---------------------------------------------------------
-CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags espeak-ng portaudio-2.0 sdl2)
+CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags espeak-ng portaudio-2.0 sdl2 libpulse-simple)
 CXXFLAGS += -Iinclude
 
-LDFLAGS   := $(shell $(PKG_CONFIG) --libs espeak-ng portaudio-2.0 sdl2)
+LDFLAGS   := $(shell $(PKG_CONFIG) --libs espeak-ng portaudio-2.0 sdl2 libpulse-simple)
 LDFLAGS  += -lvosk -lSDL2 -lGL -pthread
 
 # --- directories ---------------------------------------------------

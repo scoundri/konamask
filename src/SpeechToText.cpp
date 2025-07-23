@@ -96,6 +96,7 @@ int SpeechToText::Run() {
                 
                 if (j_result["text"].get<std::string>().c_str() != "") {
                     TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
+                    std::cout << "[INFO] Dispatched to TextToSpeak::Vebalize successfully!" << std::endl;
                 }
                 inSpeech = false;
                 silenceTimerRunning = false;

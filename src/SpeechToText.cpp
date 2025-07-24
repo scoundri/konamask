@@ -4,14 +4,14 @@
 #include <iostream>
 
 int SpeechToText::Initialize() {
+Settings& cfg = Settings::GetInstance();
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
-    
     // initialize vosk api
     vosk_set_log_level(0);
-    model = vosk_model_new("model");
+    model = vosk_model_new(cfg.VOSK_MODEL_PATH);
     if (!model) {
-        std::cerr << "[ERROR] Failed to load Vosk-API model!" << std::endl;
+        std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
         return 1;
     }
     std::cout << "[INFO] Successfully loaded the Vosk-API model!" << std::endl;
@@ -89,14 +89,14 @@ int SpeechToText::Run() {
             if (elapsed >= SILENCE_TIMEOUT_MS) {
                 // finalize utterance
                 j_result = nlohmann::json::parse(vosk_recognizer_final_result(recognizer));
-                // debug output - free to comment out
+                // debug output
                 //std::cout << "\n──────────── STT DEBUG ────────────" << std::endl;
                 //const char* result = vosk_recognizer_final_result(recognizer);
                 //std::cout << result << std::endl;
                 
                 if (j_result["text"].get<std::string>().c_str() != "") {
                     TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
-                    std::cout << "[INFO] Dispatched to TextToSpeak::Vebalize successfully!" << std::endl;
+                    std::cout << "[INFO] Dispatched content successfully!" << std::endl;
                 }
                 inSpeech = false;
                 silenceTimerRunning = false;

@@ -1,7 +1,10 @@
 #include "SpeechToText.h"
 #include "TextToSpeech.h"
+#include "Interface.h"
 
-SpeechToText stt; // object declaration
+// object declaration
+Settings& cfg = Settings::GetInstance();
+SpeechToText stt; 
 TextToSpeech tts;
 
 int main() {
@@ -35,6 +38,8 @@ int main() {
     "######%+++++++++#+++%#%####+###%#+              \n"
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
+
+    cfg.Initialize();
     tts.Initialize();
     stt.Initialize();
     tts.Shutdown();

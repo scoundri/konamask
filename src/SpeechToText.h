@@ -13,8 +13,8 @@ public:
     int Initialize();
 private:
     // silence detection settings
-    #define SILENCE_THRESHOLD     200    // amplitude threshold
-    #define SILENCE_TIMEOUT_MS   1000    // required silence duration to finalize
+    #define SILENCE_THRESHOLD 200       // amplitude threshold
+    #define SILENCE_TIMEOUT_MS 1000     // required silence duration to finalize
 
     VoskModel *model;
     VoskRecognizer *recognizer;

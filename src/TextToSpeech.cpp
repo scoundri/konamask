@@ -92,6 +92,7 @@ void TextToSpeech::Verbalize(const char* TEXT) {
 void TextToSpeech::Shutdown() {
     espeak_Synchronize(); // ensure all speech is played before exiting
     espeak_Terminate();
+    system("bash -c 'if [[ -f /tmp/virt_mods ]]; then for id in $(< /tmp/virt_mods); do pactl unload-module \"$id\" || echo \"Warning: failed to unload $id\"; done; rm /tmp/virt_mods; fi'");
     //pa_simple_drain(pa, &pa_error); TODO: make &pa_error accessible to TextToSpeech
     pa_simple_free(pa);
 }
@@ -102,7 +103,7 @@ int TextToSpeech::SynthCallback(short* wav, int numsamples, espeak_EVENT* events
         int error;
         // write the PCM into pulseaudio sink
         if (pa_simple_write(pa, wav, numsamples * sizeof(short), &error) < 0) {
-            std::cerr << "pa_simple_write failed: " << pa_strerror(error) << "\n";
+            std::cerr << "[ERROR] pa_simple_write failed: " << pa_strerror(error) << "\n";
             return 1;  // abort synthesis
         }
     }

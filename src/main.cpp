@@ -42,5 +42,5 @@ int main() {
     cfg.Initialize();
     tts.Initialize();
     stt.Initialize();
-    tts.Shutdown();
+    tts.Shutdown(); // fix konamask (virt input) not destroying
 }

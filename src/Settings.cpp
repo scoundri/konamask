@@ -7,16 +7,22 @@
 
 int Settings::Initialize() {
     std::cout << "\n>─────────────────────[LOADING CONFIGURATION]─────────────────────<\n" << std::endl;
-    auto& cfg = GetInstance();
-    if (!cfg.LoadFromFile("./config.ini")) {
+    //auto& cfg = GetInstance();
+    if (!LoadFromFile("/home/kona/Projects/Software/konamask/konamask/config.ini")) {
         std::cerr << "[ERROR] Failed to load config.ini, using defaults." << std::endl;
         return 1;
     }
-    std::string tmp;
+    //std::string tmp;
     std::cout << "[INFO] Setting values..." << std::endl;
-    tmp = cfg.get<std::string>("voskapi_model_path");
-    std::cout << tmp.c_str();
-    VOSK_MODEL_PATH = tmp.c_str();
+    //tmp = get<std::string>("voskapi_model_path");
+    //std::cout << tmp.c_str();
+    //VOSK_MODEL_PATH = tmp.c_str();
+    SPEECH_RATE = get<int>("speech_rate", 150);
+    std::cout << "[INFO] Speech rate has been set to \"" << SPEECH_RATE << "\"." << std::endl;
+    SPEECH_PITCH = get<int>("speech_pitch", 50);
+    std::cout << "[INFO] Speech pitch has been set to \"" << SPEECH_PITCH << "\"." << std::endl;
+    SPEECH_VOLUME = get<int>("speech_volume",100);
+    std::cout << "[INFO] Speech volume has been set to \"" << SPEECH_VOLUME << "\"." << std::endl;
     std::cout << "[INFO] Values set!" << std::endl;
 
     std::cout << "\n>────────────────[SUCCESSULLY LOADED CONFIGURATION]───────────────<\n" << std::endl;

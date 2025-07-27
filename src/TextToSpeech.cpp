@@ -3,7 +3,7 @@
 #include <portaudio.h>
 #include <pulse/simple.h>
 #include <pulse/error.h>
-#include <cstdlib>   // for system()
+#include <cstdlib>   // for system() & voice-fail shutdown
 
 pa_simple *pa = nullptr;
 
@@ -13,18 +13,19 @@ extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) 
 }
 
 int TextToSpeech::Initialize() {
+Settings& cfg = Settings::GetInstance();
 
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
 
     // ensure loopback are loaded
-    system("pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=Virtual_Sink");
-    system("pactl load-module module-remap-source source_name=VirtualMic master=VirtualSink.monitor source_properties=device.description=Virtual_Mic");
+    system("pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=konamask");
+    system("pactl load-module module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
 
     // create virtual microphone
     pa_sample_spec ss;
-    ss.format   = PA_SAMPLE_S16LE;          // 16‑bit PCM
-    ss.rate     = 22050;                    // must match espeak_Initialize
-    ss.channels = 1;                        // mono
+    ss.format   = PA_SAMPLE_S16LE;                  // 16‑bit PCM
+    ss.rate     = cfg.PA_SAMPLE_SPEC_RATE;          // must match espeak_Initialize
+    ss.channels = 1;
 
     int pa_error;
     pa = pa_simple_new(
@@ -38,35 +39,46 @@ int TextToSpeech::Initialize() {
         &pa_error
     );
     if (!pa) {
-        std::cerr << "[ERROR] pa_simple_new() failed: " << pa_strerror(pa_error) << "\n";
-        return 1;
+        std::cerr << "[ERROR] pa_simple_new() failed: " << pa_strerror(pa_error) << "\nShutting down!";
+        std::exit(EXIT_FAILURE);
     }
 
 
     samplerate = espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL, // audio device (retrieve raw samples instead of playing them)
-                                   ss.rate,             // buffer length - KEEP ss.rate
+                                   cfg.PA_SAMPLE_SPEC_RATE,             // buffer length - KEEP ss.rate
                                    NULL,                     // path to espeak-ng-data (NULL - $ESPEAK_DATA_PATH)
                                    0);                    // options bits
     if (samplerate <= 0) {
-        std::cerr << "[ERROR] Failed to initialize eSpeak NG!" << std::endl;
-        return 1;
+        std::cout << "[ERROR] Failed to initialize eSpeak NG, shutting down!" << std::endl;        
+        std::exit(EXIT_FAILURE);
     }
     std::cout << "[INFO] eSpeak NG initialized @ " << samplerate << " Hz" << std::endl;
 
     // set the voice by name (must match a folder/voice file)
-    if (espeak_SetVoiceByName(voice_name) != EE_OK) {
-        std::cerr << "[ERROR] Voice \"" << voice_name << "\" not found, using default!" << std::endl;
-        return 1;
-    }
-    std::cout << "[INFO] Successfully loaded voice \"" << voice_name << "\"!" << std::endl;
+    if (espeak_SetVoiceByName(cfg.SPEECH_VOICEBANK) != EE_OK) {
+        std::cout << "[ERROR] Voicebank \"" << cfg.SPEECH_VOICEBANK << "\" could not be found, using default!" << std::endl;
+        if (espeak_SetVoiceByName("en-us") == EE_OK) {
+            std::cout << "[INFO] Default voicebank found!" << std::endl;
+        } else {
+            std::cout << "[ERROR] Default voicebank not found, shutting down!" << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+    } 
+    std::cout << "[INFO] Successfully loaded voicebank!" << std::endl;
+    espeak_SetParameter(espeakRATE, cfg.SPEECH_RATE, 0);   // default ~175 wpm
+    espeak_SetParameter(espeakPITCH, cfg.SPEECH_PITCH, 0);   // default 50
+    espeak_SetParameter(espeakVOLUME, cfg.SPEECH_VOLUME, 0); // default 100% volume
+    std::cout << "[INFO] Voice parameters have been set!" << std::endl;
 
-    espeak_SetParameter(espeakRATE, 150, 0);   // default ~175 wpm
-    espeak_SetParameter(espeakPITCH, 50, 0);   // default 50
-    espeak_SetParameter(espeakVOLUME, 100, 0); // default 100% volume
-    std::cout << "[INFO] Voice parameters set!" << std::endl;
-
-    // register an event callback to track synthesis events, TODO: add valid conversion to t_espeak_callback
     espeak_SetSynthCallback(SynthCallbackC);
+
+    // clean-up
+    cfg.PA_SAMPLE_SPEC_RATE = NULL;
+    cfg.SPEECH_RATE = NULL;
+    cfg.SPEECH_PITCH = NULL;
+    cfg.SPEECH_VOLUME = NULL;
+    cfg.SPEECH_VOICEBANK = NULL;
+    std::cout << "[INFO] Cleared unnecessary memory!" << std::endl;
 
     std::cout << "\n>────────────────[INITIALIZED TEXT-TO-SPEECH SUCCESSULLY]───────────────<\n" << std::endl;
     return 0;
@@ -108,5 +120,4 @@ int TextToSpeech::SynthCallback(short* wav, int numsamples, espeak_EVENT* events
         }
     }
     return 0;
-    return 0;  // continue synthesis
 }

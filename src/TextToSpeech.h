@@ -11,6 +11,5 @@ public:
     void Shutdown();
     static int SynthCallback(short* wav, int numsamples, espeak_EVENT* events);
 private:
-    const char* voice_name = "en-us"; // TODO: add voicebank customizability
     unsigned int samplerate;
 };

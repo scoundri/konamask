@@ -1,5 +1,6 @@
 #include "SpeechToText.h"
 #include "TextToSpeech.h"
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 
@@ -14,12 +15,12 @@ Settings& cfg = Settings::GetInstance();
         std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
         return 1;
     }
-    std::cout << "[INFO] Successfully loaded the Vosk-API model!" << std::endl;
+    std::cout << "[INFO] Successfully loaded the Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
 
     // initialize portaudio
     if (Pa_Initialize() != paNoError) {
-        std::cerr << "[ERROR] PortAudio Initialization error!" << std::endl;
-        return 1;
+        std::cout << "[ERROR] PortAudio Initialization error!" << std::endl;
+        std::exit(EXIT_FAILURE);
     }
     std::cout << "[INFO] Successfully initialized PortAudio!" << std::endl;
 
@@ -28,7 +29,7 @@ Settings& cfg = Settings::GetInstance();
     sampleRate = devInfo->defaultSampleRate;
 
     // small buffer -> low latency
-    framesPerBuffer =  int(sampleRate * 0.05);  // 50 ms
+    framesPerBuffer =  int(sampleRate * cfg.BUFFER_FACTOR);
 
     std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
 
@@ -38,7 +39,7 @@ Settings& cfg = Settings::GetInstance();
 
     PaStreamParameters inputParams;
     inputParams.device = dev;
-    inputParams.channelCount = 1; // TODO: setting implementation
+    inputParams.channelCount = 1;
     inputParams.sampleFormat = paInt16;
     inputParams.suggestedLatency = devInfo->defaultLowInputLatency;
     inputParams.hostApiSpecificStreamInfo = nullptr;
@@ -50,6 +51,11 @@ Settings& cfg = Settings::GetInstance();
     }
     Pa_StartStream(stream);
     std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
+
+    //clean-up
+    cfg.VOSK_MODEL_PATH = NULL;
+    cfg.BUFFER_FACTOR = NULL;
+    std::cout << "[INFO] Cleared unnecessary memory!" << std::endl;
 
     std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
     Run();

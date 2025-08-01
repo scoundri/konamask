@@ -13,7 +13,7 @@ extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) 
 }
 
 int TextToSpeech::Initialize() {
-Settings& cfg = Settings::GetInstance();
+Settings cfg;
 
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
 

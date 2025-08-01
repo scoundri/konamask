@@ -5,7 +5,7 @@
 #include <iostream>
 
 int SpeechToText::Initialize() {
-Settings& cfg = Settings::GetInstance();
+Settings cfg;
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
     // initialize vosk api

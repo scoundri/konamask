@@ -1,9 +1,6 @@
-/*#pragma once
-#include <imgui.h>
-
+#pragma once
 class Interface {
 public:
     int Initialize();
 private:
-    bool* ALIVE;
-};*/
+};

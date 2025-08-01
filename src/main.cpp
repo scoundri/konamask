@@ -6,6 +6,7 @@
 Settings& cfg = Settings::GetInstance();
 SpeechToText stt; 
 TextToSpeech tts;
+Interface ui;
 
 int main() {
 
@@ -38,7 +39,7 @@ int main() {
     "######%+++++++++#+++%#%####+###%#+              \n"
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
-
+    ui.Initialize();
     cfg.Initialize();
     tts.Initialize();
     stt.Initialize();

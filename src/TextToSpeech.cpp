@@ -13,7 +13,7 @@ extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) 
 }
 
 int TextToSpeech::Initialize() {
-Settings cfg;
+Settings& cfg = Settings::GetInstance();
 
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
 
@@ -55,7 +55,7 @@ Settings cfg;
     std::cout << "[INFO] eSpeak NG initialized @ " << samplerate << " Hz" << std::endl;
 
     // set the voice by name (must match a folder/voice file)
-    if (espeak_SetVoiceByName(cfg.SPEECH_VOICEBANK) != EE_OK) {
+    if (espeak_SetVoiceByName(cfg.SPEECH_VOICEBANK.c_str()) != EE_OK) {
         std::cout << "[ERROR] Voicebank \"" << cfg.SPEECH_VOICEBANK << "\" could not be found, using default!" << std::endl;
         if (espeak_SetVoiceByName("en-us") == EE_OK) {
             std::cout << "[INFO] Default voicebank found!" << std::endl;
@@ -77,7 +77,6 @@ Settings cfg;
     cfg.SPEECH_RATE = NULL;
     cfg.SPEECH_PITCH = NULL;
     cfg.SPEECH_VOLUME = NULL;
-    cfg.SPEECH_VOICEBANK = NULL;
     std::cout << "[INFO] Cleared unnecessary memory!" << std::endl;
 
     std::cout << "\n>────────────────[INITIALIZED TEXT-TO-SPEECH SUCCESSULLY]───────────────<\n" << std::endl;

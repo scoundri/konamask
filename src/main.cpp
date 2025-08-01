@@ -3,7 +3,7 @@
 #include "Interface.h"
 
 // object declaration
-Settings cfg;
+Settings& cfg = Settings::GetInstance();
 SpeechToText stt; 
 TextToSpeech tts;
 

@@ -5,12 +5,12 @@
 #include <iostream>
 
 int SpeechToText::Initialize() {
-Settings cfg;
+Settings& cfg = Settings::GetInstance();
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
     // initialize vosk api
     vosk_set_log_level(0);
-    model = vosk_model_new(cfg.VOSK_MODEL_PATH);
+    model = vosk_model_new(cfg.VOSK_MODEL_PATH.c_str());
     if (!model) {
         std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
         return 1;
@@ -53,7 +53,6 @@ Settings cfg;
     std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
 
     //clean-up
-    cfg.VOSK_MODEL_PATH = NULL;
     cfg.BUFFER_FACTOR = NULL;
     std::cout << "[INFO] Cleared unnecessary memory!" << std::endl;
 

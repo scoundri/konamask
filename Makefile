@@ -11,7 +11,6 @@ LDFLAGS  += -lvosk -lSDL2 -lGL -pthread
 
 # --- directories ---------------------------------------------------
 SRCDIR     := src
-BACKENDDIR := third_party/imgui_backends
 OBJDIR     := obj
 BINDIR     := output
 

@@ -27,6 +27,9 @@ public:
     std::string SPEECH_VOICEBANK = "en-us";
     
     int PA_SAMPLE_SPEC_RATE = 22050;
+    // Interface class:
+    float BASE_FONT_SIZE = 16.0f;
+    const char* FONT_FAMILY_PATH = "./Montserrat/Montserrat-VariableFont_wght.tff";
 
 private:
     Settings() = default;

@@ -7,7 +7,7 @@ CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags espeak-ng portaudio-2.0 sdl2 libpuls
 CXXFLAGS += -Iinclude
 
 LDFLAGS   := $(shell $(PKG_CONFIG) --libs espeak-ng portaudio-2.0 sdl2 libpulse-simple)
-LDFLAGS  += -lvosk -lSDL2 -lGL -pthread
+LDFLAGS  += -lvosk -lSDL2 -lGL -pthread -limgui -lvulkan
 
 # --- directories ---------------------------------------------------
 SRCDIR     := src

@@ -7,8 +7,8 @@
 #include <iostream>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include "imgui/backends/imgui_impl_vulkan.h"
-#include "imgui/backends/imgui_impl_sdl2.h"
+#include "imgui_impl_vulkan.h"
+#include "imgui_impl_sdl2.h"
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
@@ -317,7 +317,6 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd)
 }
 
 int Interface::Render() {
-
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
@@ -326,6 +325,7 @@ int Interface::Render() {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
         return -1;
     }
+    std::cout << "[INFO] (Vulkan/SDL2) Window created successfully!" << std::endl;
 
     ImVector<const char*> extensions;
     uint32_t extensions_count = 0;
@@ -341,6 +341,7 @@ int Interface::Render() {
         printf("[ERROR] (Vulkan/SDL2) Failed to create Vulkan surface.\n");
         return 1;
     }
+    std::cout << "[INFO] (Vulkan/SDL2) Successfully created Vulkan surface!" << std::endl;
 
     // create framebuffers
     int w, h;
@@ -362,8 +363,14 @@ int Interface::Render() {
     // setup scaling
     ImGuiStyle& style = ImGui::GetStyle();
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
-    //style.FontScaleDpi = main_scale;                 // set initial font scale
+    io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
+    io.Fonts->Clear();
+    io.Fonts->AddFontFromFileTTF(cfg.FONT_FAMILY_PATH, cfg.BASE_FONT_SIZE * main_scale);
+    ImGui_ImplVulkan_NewFrame(); // rebuilds atlas with the new size
+    ImGui::NewFrame();
 
+
+    
     // setup platform/renderer backends
     ImGui_ImplSDL2_InitForVulkan(window);
     ImGui_ImplVulkan_InitInfo init_info = {};
@@ -523,6 +530,7 @@ int Interface::Initialize() {
         printf("[ERROR] (Vulkan/SDL2) %s\n", SDL_GetError());
         return -1;
     }
+    std::cout << "[INFO] (Vulkan/SDL2) SDL dependencies loaded successfully!" << std::endl;
 
 // from 2.0.18: Enable native IME
 #ifdef SDL_HINT_IME_SHOW_UI

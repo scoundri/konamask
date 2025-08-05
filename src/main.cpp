@@ -40,6 +40,7 @@ int main() {
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
     ui.Initialize();
+    ui.Render();
     cfg.Initialize();
     tts.Initialize();
     stt.Initialize();

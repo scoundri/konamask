@@ -316,6 +316,82 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd)
     wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount; // Now we can use the next set of semaphores
 }
 
+// create a VkSampler
+VkSampler CreateFontSampler(VkDevice device)
+{
+    VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    info.magFilter = VK_FILTER_LINEAR;
+    info.minFilter = VK_FILTER_LINEAR;
+    info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    info.maxAnisotropy = 1.0f;
+    VkSampler sampler;
+    vkCreateSampler(device, &info, nullptr, &sampler);
+    return sampler;
+}
+
+// create a VkImage + allocate & bind memory
+VkImage CreateFontImage(VkDevice device, VkPhysicalDevice phys, int w, int h, VkDeviceMemory& outMemory)
+{
+    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgInfo.imageType   = VK_IMAGE_TYPE_2D;
+    imgInfo.format      = VK_FORMAT_R8G8B8A8_UNORM;
+    imgInfo.extent      = { (uint32_t)w, (uint32_t)h, 1 };
+    imgInfo.mipLevels   = 1;
+    imgInfo.arrayLayers = 1;
+    imgInfo.tiling      = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage       = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImage image;
+    vkCreateImage(device, &imgInfo, nullptr, &image);
+
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(device, image, &req);
+
+    VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocInfo.allocationSize = req.size;
+    // findMemoryType is your helper to pick a memory type index with VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    allocInfo.memoryTypeIndex = findMemoryType(phys, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(device, &allocInfo, nullptr, &outMemory);
+    vkBindImageMemory(device, image, outMemory, 0);
+    return image;
+}
+
+// create a VkImageView
+VkImageView CreateFontImageView(VkDevice device, VkImage image)
+{
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format   = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1, 0,1 };
+    VkImageView view;
+    vkCreateImageView(device, &viewInfo, nullptr, &view);
+    return view;
+}
+
+// upload pixels via a staging buffer + command buffer
+void UploadFontPixels(VkDevice device, VkPhysicalDevice phys, VkCommandPool cmdPool, VkQueue queue,
+                      VkImage image, unsigned char* pixels, int w, int h)
+{
+    VkCommandBuffer cmd = beginSingleTimeCommands(device, cmdPool);
+    transitionImageLayout(cmd, image,
+          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkBufferImageCopy region{};
+    region.imageExtent = { (uint32_t)w, (uint32_t)h, 1 };
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &region);
+    transitionImageLayout(cmd, image,
+          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    endSingleTimeCommands(device, cmdPool, queue, cmd);
+}
+
+
 int Interface::Render() {
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
@@ -374,6 +450,7 @@ int Interface::Render() {
     // setup platform/renderer backends
     ImGui_ImplSDL2_InitForVulkan(window);
     ImGui_ImplVulkan_InitInfo init_info = {};
+
     //init_info.ApiVersion = VK_API_VERSION_1_3;              // pass in value of VkApplicationInfo::apiVersion, otherwise will default to header version.
     init_info.Instance = g_Instance;
     init_info.PhysicalDevice = g_PhysicalDevice;
@@ -390,6 +467,33 @@ int Interface::Render() {
     init_info.Allocator = g_Allocator;
     init_info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
+
+    // ─────────────── Insert manual font‐upload here ───────────────
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        unsigned char* pixels;
+        int width, height;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+        // Create your VkImage/VkImageView/VkSampler, upload 'pixels' into it...
+        // e.g. (pseudocode):
+        VkSampler      sampler    = CreateSampler(g_Device);
+        VkImage        image      = CreateImage(g_Device, width, height, VK_FORMAT_R8G8B8A8_UNORM);
+        VkImageView    view       = CreateImageView(g_Device, image, VK_FORMAT_R8G8B8A8_UNORM);
+        UploadToVulkanImage(g_Device, UNKNOWN, g_Queue, image, pixels, width, height);
+
+        // Register it with ImGui  
+        VkDescriptorSet desc = ImGui_ImplVulkan_AddTexture(
+            sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+
+        // Tell ImGui “this is the font atlas”
+        io.Fonts->SetTexID((ImTextureID)desc);
+
+        // We don’t need the CPU-side pixels anymore
+        io.Fonts->ClearTexData();
+    }
+    // ───────────────────────────────────────────────────────────────
 
     // Load Fonts
     // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.

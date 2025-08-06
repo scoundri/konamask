@@ -30,6 +30,9 @@ int Settings::Initialize() {
     PA_SAMPLE_SPEC_RATE = get<int>("pa_sample_spec_rate", 22050);
     std::cout << "[INFO] PulseAudio sample rate has been set to  \"" << PA_SAMPLE_SPEC_RATE << "\"." << std::endl;
 
+    UI_ENABLED = get<int>("enable_user_interface", 22050);
+    std::cout << "[INFO] UI has been set to \"" << UI_ENABLED << "\"(1 = enabled, 0 = disabled)." << std::endl;
+
     std::cout << "[INFO] Values set!" << std::endl;
 
     std::cout << "\n>───────────────────[SUCCESSULLY LOADED CONFIGURATION]──────────────────<\n" << std::endl;

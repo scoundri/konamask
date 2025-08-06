@@ -28,8 +28,9 @@ public:
     
     int PA_SAMPLE_SPEC_RATE = 22050;
     // Interface class:
+    bool UI_ENABLED = true;
     float BASE_FONT_SIZE = 16.0f;
-    const char* FONT_FAMILY_PATH = "./Montserrat/Montserrat-VariableFont_wght.tff";
+    const char* FONT_FAMILY_PATH = "./Montserrat/Montserrat-VariableFont_wght.tff_set_to_fail.fail";
 
 private:
     Settings() = default;

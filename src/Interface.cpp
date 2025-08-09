@@ -696,7 +696,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     // ───────────────────────────────────────────────────
 
-    bool show_another_window = false;
+    bool settings = false;
     bool stats = cfg.UI_STATS;
     float r;
     float g;
@@ -744,12 +744,26 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        if (show_another_window)
+        if (settings)
         {
-            ImGui::Begin("Another Window", &show_another_window);
-            ImGui::Text("Hello from another window!");
+            ImGui::Begin("Another Window", &settings);
+            ImGui::Text("Change background color:");
+            ImGui::ColorEdit3("background", (float*)&backgorund_color);
+            if (ImGui::Button("Save")) {
+                std::cout << "[INFO] Saving settings..." << std::endl;
+                ImVec4ToFloats({r,g,b,0});
+                try {
+                cfg.set<int>("ui_bgc_red", r*255);
+                cfg.set<int>("ui_bgc_green", g*255);
+                cfg.set<int>("ui_bgc_blue", b*255);
+                }
+                catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
+                std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                std::cout << "[INFO] Successfully applied all settings!" << std::endl;
+                
+            }
             if (ImGui::Button("Close Me"))
-                show_another_window = false;
+                settings = false;
             ImGui::End();
         }
         {
@@ -761,10 +775,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
             ImGui::SetNextWindowSize(ImGui::GetWindowSize());
             ImGui::Text("konamask voice transforming utility");
-            ImGui::Checkbox("Another Window", &show_another_window);
+            ImGui::Checkbox("open settings", &settings);
 
             ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-            ImGui::ColorEdit3("clear color", (float*)&backgorund_color);
 
             ImGui::SameLine();
             ImGui::Text("counter = %d", counter);

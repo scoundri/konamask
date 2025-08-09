@@ -32,7 +32,7 @@ Settings& cfg = Settings::GetInstance();
         nullptr,                             // server (NULL = default)
         "konamask Virtual Micropone",          // client name
         PA_STREAM_PLAYBACK,
-        "VirtualSink",                     // sink name
+        "VirtualSink",                          // sink name
         "konamask routed TTS voice",    // stream description
         &ss,                                     // sample format
         nullptr, nullptr,

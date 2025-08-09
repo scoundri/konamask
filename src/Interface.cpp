@@ -14,6 +14,7 @@
 #include <SDL2/SDL_vulkan.h>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
+#include <array> // for ImVec4 conversion
 
 #ifdef _WIN32
 #include <windows.h>
@@ -553,6 +554,12 @@ void UploadFontPixels(VkDevice device, VkPhysicalDevice physDevice,
     vkFreeMemory(device, stagingMemory, nullptr);
 }
 
+std::array<float,4> ImVec4ToFloats(const ImVec4 &c) {
+    return { c.x, c.y, c.z, c.w };
+}
+inline ImVec4 FloatsToImVec4(const std::array<float,4>& a) noexcept {
+    return ImVec4(a[0], a[1], a[2], a[3]);
+}
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // create window with Vulkan graphics context
@@ -691,7 +698,23 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
     bool show_another_window = false;
     bool stats = cfg.UI_STATS;
-    ImVec4 backgorund_color = ImVec4(0.26f, 0.05f, 0.40f, 1.00f);
+    float r;
+    float g;
+    float b;
+    // validate range & convert to normalized floats
+    auto in_range = [](int v){ return (v >= 0 && v <= 255); };
+    if (!in_range(cfg.get<int>("ui_bgc_red",   50)) || !in_range(cfg.get<int>("ui_bgc_green", 20)) || !in_range(cfg.get<int>("ui_bgc_blue",  60))) {
+        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults.\n";
+        r = static_cast<float>(50); g = static_cast<float>(20); b = static_cast<float>(60);
+    } 
+    else {
+        // convert to normalized floats 0.0..1.0
+        r = static_cast<float>(cfg.get<int>("ui_bgc_red",   50)) / 255.0f;
+        g = static_cast<float>(cfg.get<int>("ui_bgc_green", 20)) / 255.0f;
+        b = static_cast<float>(cfg.get<int>("ui_bgc_blue",  60)) / 255.0f;
+    }
+    std::cout << "[INFO] Setting SDL2 background color as following:\n Red: " << r*255 << "\n Green: " << g*255 << "\n Blue: " << b*255 << std::endl; 
+    ImVec4 backgorund_color(r, g, b, 1.0f);
     while (runningFlag->load()) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {

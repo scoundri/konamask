@@ -30,6 +30,9 @@ public:
     // Interface class:
     bool UI_ENABLED = true;
     bool UI_STATS = false;
+    unsigned short UI_BGC_R = 40;
+    unsigned short UI_BGC_G = 50;
+    unsigned short UI_BGC_B = 60;
     float BASE_FONT_SIZE = 16.0f;
     const char* FONT_FAMILY_PATH = "./Montserrat/Montserrat-VariableFont_wght.tff_set_to_fail.fail";
 

@@ -8,5 +8,4 @@ public:
     int Render(std::atomic<bool>* runningFlag);
 private:
     Settings& cfg = Settings::GetInstance();
-
 };

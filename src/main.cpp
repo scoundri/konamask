@@ -44,7 +44,7 @@ int main() {
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
     cfg.Initialize();
-    if (cfg.UI_ENABLED) {
+    /*if (cfg.UI_ENABLED) {
         ui.Initialize();
         std::thread uiThread([&](){
             try {
@@ -73,5 +73,8 @@ int main() {
         tts.Initialize();
         stt.Initialize();
         tts.Shutdown(); // fix konamask (virt input) not destroying
-    }
+    }*/
+    cfg.Initialize();
+    ui.Initialize();
+    ui.Render(&uiRunning);
 }

@@ -558,7 +558,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_Window* window = SDL_CreateWindow("Dear ImGui SDL2+Vulkan example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
+    SDL_Window* window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
     if (window == nullptr) {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
         return -1;
@@ -576,10 +576,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     VkSurfaceKHR surface;
     VkResult err;
     if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0) {
-        printf("[ERROR] (Vulkan/SDL2) Failed to create Vulkan surface.\n");
+        printf("[ERROR] (Vulkan/SDL2) Failed to create Vulkan/SDL2 surface.\n");
         return 1;
     }
-    std::cout << "[INFO] (Vulkan/SDL2) Successfully created Vulkan surface!" << std::endl;
+    std::cout << "[INFO] (Vulkan/SDL2) Successfully created Vulkan/SDL2 surface!" << std::endl;
 
     // create framebuffers
     int w, h;
@@ -689,10 +689,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     // ───────────────────────────────────────────────────
 
-    bool show_demo_window = true;
     bool show_another_window = false;
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-
+    bool stats = cfg.UI_STATS;
+    ImVec4 backgorund_color = ImVec4(0.26f, 0.05f, 0.40f, 1.00f);
     while (runningFlag->load()) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -721,30 +720,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-        if (show_demo_window)
-            ImGui::ShowDemoWindow(&show_demo_window);
-
-        {
-            static float f = 0.0f;
-            static int counter = 0;
-
-            ImGui::Begin("Hello, world!");
-
-            ImGui::Text("This is some useful text.");
-            ImGui::Checkbox("Demo Window", &show_demo_window);
-            ImGui::Checkbox("Another Window", &show_another_window);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-            ImGui::ColorEdit3("clear color", (float*)&clear_color);
-
-            if (ImGui::Button("Button"))
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-            ImGui::End();
-        }
 
         if (show_another_window)
         {
@@ -754,6 +729,29 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 show_another_window = false;
             ImGui::End();
         }
+        {
+            
+            static float f = 0.0f;
+            static int counter = 0;
+            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(fb_width,fb_height), ImGuiCond_Always);
+            ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+            ImGui::SetNextWindowSize(ImGui::GetWindowSize());
+            ImGui::Text("konamask voice transforming utility");
+            ImGui::Checkbox("Another Window", &show_another_window);
+
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
+            ImGui::ColorEdit3("clear color", (float*)&backgorund_color);
+
+            ImGui::SameLine();
+            ImGui::Text("counter = %d", counter);
+            if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
+            if (ImGui::Button("Exit"))
+                break;
+            ImGui::End();
+
+        }
+
 
         // rendering
         ImGui::Render();
@@ -761,23 +759,23 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
         if (!is_minimized)
         {
-            wd->ClearValue.color.float32[0] = clear_color.x * clear_color.w;
-            wd->ClearValue.color.float32[1] = clear_color.y * clear_color.w;
-            wd->ClearValue.color.float32[2] = clear_color.z * clear_color.w;
-            wd->ClearValue.color.float32[3] = clear_color.w;
+            wd->ClearValue.color.float32[0] = backgorund_color.x;
+            wd->ClearValue.color.float32[1] = backgorund_color.y;
+            wd->ClearValue.color.float32[2] = backgorund_color.z;
             FrameRender(wd, draw_data);
             FramePresent(wd);
         }
     }
 
     // cleanup
-    err = vkDeviceWaitIdle(g_Device);
-    check_vk_result(err);
+    // err = vkDeviceWaitIdle(g_Device);
+    // check_vk_result(err);
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 
     CleanupVkWindow();
+    vkDestroySurfaceKHR(g_Instance, surface, nullptr);
     VkCleanup();
 
     SDL_DestroyWindow(window);

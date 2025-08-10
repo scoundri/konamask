@@ -44,7 +44,8 @@ int main() {
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
     cfg.Initialize();
-    /*if (cfg.UI_ENABLED) {
+    if (cfg.get<int>("enable_user_interface", true)) {
+    std::cout << "[INFO] UI has been enabled." << std::endl;
         ui.Initialize();
         std::thread uiThread([&](){
             try {
@@ -70,11 +71,12 @@ int main() {
         }
     }
     else {
+    std::cout << "[INFO] UI has been disabled." << std::endl;
         tts.Initialize();
         stt.Initialize();
         tts.Shutdown(); // fix konamask (virt input) not destroying
-    }*/
-    cfg.Initialize();
-    ui.Initialize();
-    ui.Render(&uiRunning);
+    }
+    // cfg.Initialize();
+    // ui.Initialize();
+    // ui.Render(&uiRunning);
 }

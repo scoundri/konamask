@@ -7,7 +7,7 @@ public:
     int Initialize();
     static Settings& GetInstance();
     bool LoadFromFile(const std::string& filename);
-
+    bool SaveToFile(const std::string& filename) const;
     // templated getters for retrieving values with type conversion
     template<typename T>
     T get(const std::string& key, const T& defaultValue = T()) const;
@@ -15,26 +15,6 @@ public:
     // templated setters for modifying at runtime
     template<typename T>
     void set(const std::string& key, const T& value);
-
-    // ------- values -------
-    // SpeechToText class:
-    std::string VOSK_MODEL_PATH = "model";
-    double BUFFER_FACTOR = 0.05; // 50ms
-    // TextToSpeech class:
-    unsigned short SPEECH_RATE = 150;
-    unsigned short SPEECH_PITCH = 50;
-    unsigned short SPEECH_VOLUME = 100;
-    std::string SPEECH_VOICEBANK = "en-us";
-    
-    int PA_SAMPLE_SPEC_RATE = 22050;
-    // Interface class:
-    bool UI_ENABLED = true;
-    bool UI_STATS = false;
-    unsigned short UI_BGC_R = 40;
-    unsigned short UI_BGC_G = 50;
-    unsigned short UI_BGC_B = 60;
-    float BASE_FONT_SIZE = 16.0f;
-    const char* FONT_FAMILY_PATH = "./Montserrat/Montserrat-VariableFont_wght.tff_set_to_fail.fail";
 
 private:
     Settings() = default;

@@ -1,21 +1,21 @@
 #include "SpeechToText.h"
-#include "TextToSpeech.h"
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 
 int SpeechToText::Initialize() {
-Settings& cfg = Settings::GetInstance();
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
     // initialize vosk api
     vosk_set_log_level(0);
-    model = vosk_model_new(cfg.VOSK_MODEL_PATH.c_str());
+
+    
+    model = vosk_model_new(cfg.get<std::string>("voskapi_model_path", "./model").c_str());
     if (!model) {
-        std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
+        std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.get<std::string>("voskapi_model_path", "./model") << "\"!" << std::endl;
         return 1;
     }
-    std::cout << "[INFO] Successfully loaded the Vosk-API model from \"" << cfg.VOSK_MODEL_PATH << "\"!" << std::endl;
+    std::cout << "[INFO] Successfully loaded the Vosk-API model from \"" << cfg.get<std::string>("voskapi_model_path", "./model") << "\"!" << std::endl;
 
     // initialize portaudio
     if (Pa_Initialize() != paNoError) {
@@ -29,8 +29,8 @@ Settings& cfg = Settings::GetInstance();
     sampleRate = devInfo->defaultSampleRate;
 
     // small buffer -> low latency
-    framesPerBuffer =  int(sampleRate * cfg.BUFFER_FACTOR);
-
+    framesPerBuffer =  int(sampleRate * cfg.get<double>("buffer_factor", 0.05));
+    std::cout << "[INFO] Buffer factor has been set to  \"" << cfg.get<double>("buffer_factor", 0.05) << "\"." << std::endl;
     std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
 
     recognizer = vosk_recognizer_new(model, sampleRate);
@@ -51,10 +51,6 @@ Settings& cfg = Settings::GetInstance();
     }
     Pa_StartStream(stream);
     std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
-
-    //clean-up
-    cfg.BUFFER_FACTOR = NULL;
-    std::cout << "[INFO] Cleared unnecessary memory!" << std::endl;
 
     std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
     Run();
@@ -100,6 +96,7 @@ int SpeechToText::Run() {
                 //std::cout << result << std::endl;
                 
                 if (j_result["text"].get<std::string>().c_str() != "") {
+                    std::cout << "[INFO] Dispatching \"" << j_result["text"].get<std::string>() << "\"..." << std::endl;
                     TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
                     std::cout << "[INFO] Dispatched content successfully!" << std::endl;
                 }

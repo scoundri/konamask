@@ -8,32 +8,11 @@
 int Settings::Initialize() {    
     std::cout << "\n>────────────────────────[LOADING CONFIGURATION]────────────────────────<\n" << std::endl;
 
-    if (!LoadFromFile("/home/kona/Projects/Software/konamask/konamask/config.ini")) {
+    if (!LoadFromFile("./config.ini")) {
         std::cerr << "[ERROR] Failed to load config.ini, using defaults." << std::endl;
         return 1;
     }
-    std::cout << "[INFO] Setting values..." << std::endl;
-    SPEECH_RATE = get<int>("speech_rate", 150);
-    std::cout << "[INFO] Speech rate has been set to \"" << SPEECH_RATE << "\"." << std::endl;
-    SPEECH_PITCH = get<int>("speech_pitch", 50);
-    std::cout << "[INFO] Speech pitch has been set to \"" << SPEECH_PITCH << "\"." << std::endl;
-    SPEECH_VOLUME = get<int>("speech_volume",100);
-    std::cout << "[INFO] Speech volume has been set to \"" << SPEECH_VOLUME << "\"." << std::endl;
-    SPEECH_VOICEBANK = get<std::string>("speech_vociebank", "en-us");
-    std::cout << "[INFO] Speech volume has been set to \"" << SPEECH_VOICEBANK << "\"." << std::endl;
-
-    VOSK_MODEL_PATH = get<std::string>("voskapi_model_path", "./model");
-    std::cout << "[INFO] Vosk API path has been set to  \"" << VOSK_MODEL_PATH << "\"." << std::endl;
-    BUFFER_FACTOR = get<double>("voskapi_model_path", 0.05);
-    std::cout << "[INFO] Buffer factor has been set to  \"" << BUFFER_FACTOR << "\"." << std::endl;
-
-    PA_SAMPLE_SPEC_RATE = get<int>("pa_sample_spec_rate", 22050);
-    std::cout << "[INFO] PulseAudio sample rate has been set to  \"" << PA_SAMPLE_SPEC_RATE << "\"." << std::endl;
-
-    UI_ENABLED = get<int>("enable_user_interface", 22050);
-    std::cout << "[INFO] UI has been set to \"" << UI_ENABLED << "\"(1 = enabled, 0 = disabled)." << std::endl;
-
-    std::cout << "[INFO] Values set!" << std::endl;
+    std::cerr << "[INFO] Successfully loaded config.ini!" << std::endl;
 
     std::cout << "\n>───────────────────[SUCCESSULLY LOADED CONFIGURATION]──────────────────<\n" << std::endl;
     return 0;
@@ -84,6 +63,17 @@ bool Settings::LoadFromFile(const std::string& filename) {
 
     return true;
 }
+
+bool Settings::SaveToFile(const std::string& filename) const { // TODO: make comments persistent
+    std::ofstream file(filename);
+    if (!file.is_open()) return false;
+    for (const auto& [key, value] : data_) {
+        file << key << " = " << value << "\n";
+        std::cout << "[INFO] Wrote value \"" << value << "\" @ \"" << key << "\" successfully!" << std::endl;
+    }
+    return true;
+}
+
 
 template<typename T>
 T Settings::get(const std::string& key, const T& defaultValue) const {

@@ -610,9 +610,14 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
     io.Fonts->Clear();
-    //io.Fonts->AddFontFromFileTTF(cfg.FONT_FAMILY_PATH, cfg.BASE_FONT_SIZE * main_scale); - fails
-    io.Fonts->AddFontDefault();
-
+    if (cfg.get<std::string>("ui_custom_font", ""), "" == "") {
+        io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
+    }
+    else {
+        std::cout << "[INFO] Font parameter was not set to load custom font, using default!" << std::endl;
+        io.Fonts->AddFontDefault();
+    }
+    
     
     // setup platform/renderer backends
     ImGui_ImplSDL2_InitForVulkan(window);
@@ -697,7 +702,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // ───────────────────────────────────────────────────
 
     bool settings = false;
-    bool stats = cfg.UI_STATS;
+    bool stats = cfg.get<bool>("enable_statistics", false);
     float r;
     float g;
     float b;
@@ -744,25 +749,29 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
+        ImGui::ShowDemoWindow();
+
         if (settings)
         {
-            ImGui::Begin("Another Window", &settings);
+            ImGui::Begin("Settings", &settings);
             ImGui::Text("Change background color:");
             ImGui::ColorEdit3("background", (float*)&backgorund_color);
+            //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
             if (ImGui::Button("Save")) {
                 std::cout << "[INFO] Saving settings..." << std::endl;
                 ImVec4ToFloats({r,g,b,0});
                 try {
-                cfg.set<int>("ui_bgc_red", r*255);
-                cfg.set<int>("ui_bgc_green", g*255);
-                cfg.set<int>("ui_bgc_blue", b*255);
+                    cfg.set<int>("ui_bgc_red", r*255);
+                    cfg.set<int>("ui_bgc_green", g*255);
+                    cfg.set<int>("ui_bgc_blue", b*255);
                 }
                 catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
                 std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                std::cout << "[INFO] Successfully applied all settings!" << std::endl;
-                
+                if (cfg.SaveToFile("./config.ini")) {
+                    std::cout << "[INFO] Successfully applied all settings!" << std::endl;
+                } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
             }
-            if (ImGui::Button("Close Me"))
+            if (ImGui::Button("Close"))
                 settings = false;
             ImGui::End();
         }

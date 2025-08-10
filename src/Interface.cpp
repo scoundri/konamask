@@ -17,6 +17,7 @@
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 #include <array> // for ImVec4 conversion
+#include <limits.h> // for config.ini path
 
 #ifdef _WIN32
 #include <windows.h>
@@ -632,8 +633,7 @@ static int Shutdown(VkSurfaceKHR g_Surface) {
         return 0;
 }
 
-void Interface::Minimize()
-{
+void Interface::Minimize() {
     if (!window) return;
     // stop rendering loop
     g_RenderPaused.store(true, std::memory_order_release);
@@ -643,8 +643,7 @@ void Interface::Minimize()
     //SDL_MinimizeWindow(g_Window); // minimize to taskbar - scrapped (will not work on some WMs)
 }
 
-void Show()
-{
+void Show() {
     if (!window) return;
 
     // show and bring front
@@ -658,6 +657,9 @@ void Show()
 }
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
+    // configuration path
+    char config_path[PATH_MAX];
+    snprintf(config_path, sizeof(config_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
@@ -866,7 +868,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 }
                 catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
                 std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                if (cfg.SaveToFile("./config.ini")) {
+                if (cfg.SaveToFile(config_path)) {
                     std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                 } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
             }

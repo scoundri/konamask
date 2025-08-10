@@ -4,12 +4,17 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <limits.h> // for path
 
 int Settings::Initialize() {    
     std::cout << "\n>────────────────────────[LOADING CONFIGURATION]────────────────────────<\n" << std::endl;
 
-    if (!LoadFromFile("./config.ini")) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
+
+    if (!LoadFromFile(path)) {
         std::cerr << "[ERROR] Failed to load config.ini, using defaults." << std::endl;
+        std::cout << "\n>──────────────────[UNSUCCESSULLY LOADED CONFIGURATION]─────────────────<\n" << std::endl;
         return 1;
     }
     std::cerr << "[INFO] Successfully loaded config.ini!" << std::endl;

@@ -632,7 +632,7 @@ static int Shutdown(VkSurfaceKHR g_Surface) {
         return 0;
 }
 
-void Minimize()
+void Interface::Minimize()
 {
     if (!window) return;
     // stop rendering loop

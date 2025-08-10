@@ -1,7 +1,7 @@
 #include "SpeechToText.h"
 #include "TextToSpeech.h"
+#include "Tray.h"
 #include "Interface.h"
-#include "tray.h"
 #include <atomic>
 #include <thread>
 
@@ -10,28 +10,22 @@ Settings& cfg = Settings::GetInstance();
 SpeechToText stt; 
 TextToSpeech tts;
 Interface ui;
+TrayMenu tray("./img/tray.png", "konamask utility");
 
 std::atomic<bool> uiRunning{true};
 
-static void shutdown(struct tray_menu *item) {
-        
-    if (cfg.get<int>("enable_user_interface", true)) { }
+static void shutdown() {
+    Interface::Minimize();
     tts.Initialize();
     stt.Initialize();
     tts.Shutdown(); // fix konamask (virt input) not destroying
+    tray.Shutdown();
+}
+
+static void openui() {
 
 }
 
-static void openui(struct tray_menu *item) {
-
-}
-struct tray tray = {
-    .icon = "./img/tray.png",
-    .menu = (struct tray_menu[]){{"Toggle me", 0, 0, openui, NULL},
-                                 {"-", 0, 0, NULL, NULL},
-                                 {"Quit", 0, 0, shutdown, NULL},
-                                 {NULL, 0, 0, NULL, NULL}},
-};
 
 
 int main() {
@@ -65,7 +59,27 @@ int main() {
     "######%+++++++++#+++%#%####+###%#+              \n"
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
-
+    tray.AddItem("Open Dashboard", [](){ openui(); });
+    tray.AddItem("Quit", [&](){ shutdown(); });
+    if (!tray.Show()) {
+        std::cerr << "[ERROR] Failed to start tray!" << std::endl;
+    }
+    std::thread trayThread([&](){
+        try {
+            for (int i = 0; i < 10; ++i) {
+            std::cout << "main loop tick " << i << "\n";
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Tray exception: " << e.what() << std::endl;
+            uiRunning = false;
+        }
+        catch (...) {
+            std::cerr << "Unexpected tray exception!" << std::endl;
+            uiRunning = false;
+        }
+    });
     cfg.Initialize();
     if (cfg.get<int>("enable_user_interface", true)) {
     std::cout << "[INFO] UI has been enabled." << std::endl;
@@ -76,15 +90,14 @@ int main() {
             }
             catch (const std::exception& e) {
                 std::cerr << "UI exception: " << e.what() << "\n"
-                          << "Falling back to console mode.\n";
+                          << "Falling back to console mode." << std::endl;
                 uiRunning = false;
             }
             catch (...) {
-                std::cerr << "Unexpected UI exception! Falling back to console mode.\n";
+                std::cerr << "Unexpected UI exception! Falling back to console mode." << std::endl;
                 uiRunning = false;
             }
         });
-        ui.Render(&uiRunning);
         tts.Initialize();
         stt.Initialize();
         tts.Shutdown(); // fix konamask (virt input) not destroying

@@ -1,6 +1,7 @@
 #include "SpeechToText.h"
 #include "TextToSpeech.h"
 #include "Interface.h"
+#include "tray.h"
 #include <atomic>
 #include <thread>
 
@@ -11,6 +12,27 @@ TextToSpeech tts;
 Interface ui;
 
 std::atomic<bool> uiRunning{true};
+
+static void shutdown(struct tray_menu *item) {
+        
+    if (cfg.get<int>("enable_user_interface", true)) { }
+    tts.Initialize();
+    stt.Initialize();
+    tts.Shutdown(); // fix konamask (virt input) not destroying
+
+}
+
+static void openui(struct tray_menu *item) {
+
+}
+struct tray tray = {
+    .icon = "./img/tray.png",
+    .menu = (struct tray_menu[]){{"Toggle me", 0, 0, openui, NULL},
+                                 {"-", 0, 0, NULL, NULL},
+                                 {"Quit", 0, 0, shutdown, NULL},
+                                 {NULL, 0, 0, NULL, NULL}},
+};
+
 
 int main() {
 
@@ -43,6 +65,7 @@ int main() {
     "######%+++++++++#+++%#%####+###%#+              \n"
     "##%#%%+++++####++++%%%#+##########              \n\n";
     
+
     cfg.Initialize();
     if (cfg.get<int>("enable_user_interface", true)) {
     std::cout << "[INFO] UI has been enabled." << std::endl;
@@ -65,10 +88,12 @@ int main() {
         tts.Initialize();
         stt.Initialize();
         tts.Shutdown(); // fix konamask (virt input) not destroying
-        if (uiThread.joinable()) {
-            uiRunning = false;
-            uiThread.join();
-        }
+        try {
+            if (uiThread.joinable()) {
+                uiRunning = false;
+                uiThread.join();
+            }
+        } catch (...) { std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; }
     }
     else {
     std::cout << "[INFO] UI has been disabled." << std::endl;

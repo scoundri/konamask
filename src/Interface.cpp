@@ -1,6 +1,7 @@
-// code taken from: https://github.com/ocornut/imgui/blob/master/examples/example_sdl2_vulkan/main.cpp
+// most initialization code was taken from: https://github.com/ocornut/imgui/
 
 #include "Interface.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
+#include <thread>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 #include <array> // for ImVec4 conversion
@@ -42,6 +44,8 @@ static VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
 static VkCommandPool            g_CommandPool = VK_NULL_HANDLE;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
+SDL_Window*                     window;
+std::atomic<bool>               g_RenderPaused{false};
 static uint32_t                 g_MinImageCount = 2;
 static bool                     g_SwapChainRebuild = false;
 
@@ -561,11 +565,103 @@ inline ImVec4 FloatsToImVec4(const std::array<float,4>& a) noexcept {
     return ImVec4(a[0], a[1], a[2], a[3]);
 }
 
+static int Shutdown(VkSurfaceKHR g_Surface) {
+
+        // wait for device idle if available
+        if (g_Device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(g_Device);
+        }
+
+        // shutdown ImGui renderer & platform backends (renderer first)
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplSDL2_Shutdown();
+
+        if (ImGui::GetCurrentContext() != nullptr) {
+            ImGui::DestroyContext();
+        }
+
+#ifdef IMGUI_IMPL_VULKANH_HEADERS_AVAILABLE
+        if (g_Instance != VK_NULL_HANDLE && g_Device != VK_NULL_HANDLE) {
+            ImGui_ImplVulkanH_DestroyWindow(g_Instance, g_Device, &g_MainWindowData, g_Allocator);
+        }
+#endif
+
+        // destroy Vulkan objects
+        if (g_CommandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(g_Device, g_CommandPool, g_Allocator);
+            g_CommandPool = VK_NULL_HANDLE;
+        }
+
+        if (g_DescriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
+            g_DescriptorPool = VK_NULL_HANDLE;
+        }
+
+        if (g_PipelineCache != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(g_Device, g_PipelineCache, g_Allocator);
+            g_PipelineCache = VK_NULL_HANDLE;
+        }
+
+        if (g_Device != VK_NULL_HANDLE) {
+            vkDestroyDevice(g_Device,g_Allocator);
+            g_Device = VK_NULL_HANDLE;
+        }
+
+        if (g_Instance != VK_NULL_HANDLE) {
+            vkDestroyInstance(g_Instance, g_Allocator);
+            g_Instance = VK_NULL_HANDLE;
+        }
+
+        if (g_Surface != VK_NULL_HANDLE && g_Instance != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(g_Instance, g_Surface, g_Allocator);
+            g_Surface = VK_NULL_HANDLE;
+        }
+
+        // clear globals
+        g_PhysicalDevice = VK_NULL_HANDLE;
+        g_Queue = VK_NULL_HANDLE;
+        g_QueueFamily = (uint32_t)-1;
+        g_MinImageCount = 2;
+        g_SwapChainRebuild = false;
+
+        if (window) {
+            SDL_DestroyWindow(window);
+            window = nullptr;
+        }
+        SDL_Quit();
+        return 0;
+}
+
+void Minimize()
+{
+    if (!window) return;
+    // stop rendering loop
+    g_RenderPaused.store(true, std::memory_order_release);
+
+    // hide or minimize the window
+    SDL_HideWindow(window);
+    //SDL_MinimizeWindow(g_Window); // minimize to taskbar - scrapped (will not work on some WMs)
+}
+
+void Show()
+{
+    if (!window) return;
+
+    // show and bring front
+    SDL_ShowWindow(window);
+    SDL_RaiseWindow(window);
+    SDL_RestoreWindow(window);
+
+    // may need to recreate swapchain if window size changed while hidden
+
+    g_RenderPaused.store(false, std::memory_order_release);
+}
+
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_Window* window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
+    window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
     if (window == nullptr) {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
         return -1;
@@ -733,7 +829,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             SDL_Delay(10);
             continue;
         }
-
+        if (g_RenderPaused.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
         // resize swap chain?
         int fb_width, fb_height;
         SDL_GetWindowSize(window, &fb_width, &fb_height);
@@ -791,8 +890,14 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SameLine();
             ImGui::Text("counter = %d", counter);
             if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
-            if (ImGui::Button("Exit"))
-                break;
+            if (ImGui::Button("Minimize")) {
+                Minimize();
+            }            
+            if (ImGui::Button("Exit")) {
+                if (!Shutdown(surface)) {
+                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+                }
+            }
             ImGui::End();
 
         }
@@ -813,18 +918,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
 
     // cleanup
-    // err = vkDeviceWaitIdle(g_Device);
-    // check_vk_result(err);
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
-    ImGui::DestroyContext();
-
-    CleanupVkWindow();
-    vkDestroySurfaceKHR(g_Instance, surface, nullptr);
-    VkCleanup();
-
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    if (!Shutdown(surface)) {
+        std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+    }
 
     return 0;
 }
@@ -851,3 +947,4 @@ int Interface::Initialize() {
     std::cout << "\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n" << std::endl;
     return 0;
 }
+

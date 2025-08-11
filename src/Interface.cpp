@@ -1248,6 +1248,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         }
         {
             
+            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
             static float f = 0.0f;
             static int counter = 0;
             ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);

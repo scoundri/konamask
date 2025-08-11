@@ -9,6 +9,7 @@
 #include <iostream>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include "Settings.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_impl_sdl2.h"
 #include <stdlib.h>
@@ -21,6 +22,8 @@
 #include <limits.h> // for config.ini path
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h> // for texture (image) loading
+#include <fstream> // for CheckFile and CopyFile
+#include <sys/stat.h> // for CheckFile and CopyFile
 
 #ifdef _WIN32
 #include <windows.h>
@@ -86,6 +89,43 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, 
     return VK_FALSE;
 }
 #endif
+
+static bool CheckFile(const char* path) {
+    struct stat info;
+    if (stat(path, &info) != 0) {
+        std::cerr << "[ERROR] File check failed: " << strerror(errno) << "\n[INFO] Path \"" << path << "\" does not exist." << std::endl;
+        return false;
+    }
+
+    if (info.st_mode & S_IFREG) {
+        return true; // path exists & is a file
+    } else {
+        std::cerr << "[ERROR] Path \"" << path << "\" is not a file." << std::endl;
+        return false;
+    }
+}
+
+static bool CopyFile(const std::string& src, const std::string& dest) {
+    std::ifstream sourceFile(src, std::ios::binary);
+    if (!sourceFile.is_open()) {
+        std::cerr << "[ERROR] Could not open source file (" << dest << ")." << std::endl;
+        return false;
+    }
+
+    std::ofstream destinationFile(dest, std::ios::binary);
+    if (!destinationFile.is_open()) {
+        std::cerr << "[ERROR] Could not open destination file (" << dest << ")." << std::endl;
+        sourceFile.close();
+        return false;
+    }
+
+    destinationFile << sourceFile.rdbuf();
+
+    sourceFile.close();
+    destinationFile.close();
+
+    return true;
+}
 
 // vulkan helpers
 uint32_t findMemoryType(VkPhysicalDevice physDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
@@ -1091,6 +1131,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     bool settings = false;
     bool debug_log = true;
     bool stats = cfg.get<bool>("enable_statistics", false);
+    //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
+    bool imgbg = (CheckFile(image_path));
     float r;
     float g;
     float b;
@@ -1108,11 +1150,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     std::cout << "[INFO] Setting SDL2 background color as following:\n[INFO] Red: " << r*255 << "\n[INFO] Green: " << g*255 << "\n[INFO] Blue: " << b*255 << std::endl; 
     ImVec4 backgorund_color(r, g, b, 1.0f);
-
     // load user background image
     TextureData* texture;
     bool ret = LoadTextureFromFile(image_path, texture);
+    if (imgbg) {
     IM_ASSERT(ret);
+    }
     while (runningFlag->load()) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -1172,41 +1215,37 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (debug_log) {
             ImGui::ShowDebugLogWindow();
         }
-// remove padding
-ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-{
-    ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
-
-    ImGui::Begin("background", nullptr,
-                 ImGuiWindowFlags_NoMove |
-                 ImGuiWindowFlags_NoTitleBar |
-                 ImGuiWindowFlags_NoBringToFrontOnFocus |
-                 ImGuiWindowFlags_NoInputs |
-                 ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_NoScrollbar |
-                 ImGuiWindowFlags_NoBackground);
-
-
-        ImGui::Image(
-            (ImTextureID)texture->DS,
-            ImVec2(fb_width, fb_height),
-            ImVec2(
-                ImClamp(((std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f),
-                ImClamp(((std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)
-            ),
-            ImVec2(
-                ImClamp(1.0f - ((std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f),
-                ImClamp(1.0f - ((std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->height > 0) ? (float)texture->height : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)
-            )
-        );
-    
-
-    ImGui::End();
-}
-ImGui::PopStyleVar();
-
+        if (imgbg) {
+            // remove padding
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            {
+                ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
+            
+                ImGui::Begin("background", nullptr,
+                             ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoTitleBar |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus |
+                             ImGuiWindowFlags_NoInputs |
+                             ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoScrollbar |
+                             ImGuiWindowFlags_NoBackground);
+                
+                
+                ImGui::Image(
+                    (ImTextureID)texture->DS, 
+                    ImVec2(fb_width, fb_height), 
+                
+                    ImVec2(ImClamp(((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f))), 0.0f, 1.0f), ImClamp(((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)), 
+                    ImVec2(ImClamp(1.0f - ((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f))), 0.0f, 1.0f), ImClamp(1.0f - ((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)));
+                
+                
+                
+                ImGui::End();
+            }
+            ImGui::PopStyleVar();
+        }
         {
             
             static float f = 0.0f;

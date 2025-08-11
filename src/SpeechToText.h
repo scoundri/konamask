@@ -17,7 +17,7 @@ private:
 
     // silence detection settings
     #define SILENCE_THRESHOLD cfg.get<int>("silence_threshold", 200)       // amplitude threshold
-    #define SILENCE_TIMEOUT_MS cfg.get<int>("silence_threshold", 1000)      // required silence duration to finalize
+    #define SILENCE_TIMEOUT_MS cfg.get<int>("silence_threshold", 1000)     // required silence duration to finalize
 
     VoskModel *model;
     VoskRecognizer *recognizer;

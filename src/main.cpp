@@ -3,6 +3,7 @@
 #include "Interface.h"
 #include "curl.h"
 #include <atomic>
+#include <cstdlib>
 #include <thread>
 #include <sys/stat.h> // for mkdir
 #include <limits.h>
@@ -16,24 +17,120 @@ Interface ui;
 
 std::atomic<bool> uiRunning{true};
 
+#if defined(_WIN32) || defined(_WIN64)
+  #include <windows.h>
+  #include <shellapi.h>
+  // convert utf-8 string to wstring
+  static std::wstring utf8_to_wstring(const std::string &s) {
+      if (s.empty()) return std::wstring();
+      int size_needed = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
+      std::wstring w(size_needed, 0);
+      MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], size_needed);
+      return w;
+  }
+#else
+  #include <unistd.h>
+  #include <sys/types.h>
+  #include <sys/wait.h>
+  #include <errno.h>
+#endif
+
+static bool open_url(const std::string &url) {
+    if (url.empty()) return false;
+
+#if defined(_WIN32) || defined(_WIN64)
+    // use ShellExecuteW using a utf-16 string
+    std::wstring wurl = utf8_to_wstring(url);
+    HINSTANCE result = ShellExecuteW(NULL, L"open", wurl.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    // ShellExecute returns value > 32 for success
+    return reinterpret_cast<intptr_t>(result) > 32;
+#else
+    // prefer xdg-open (widely available)
+    pid_t pid = fork();
+    if (pid == -1) return false; // fork failed
+    if (pid == 0) {
+        // child
+        execlp("xdg-open", "xdg-open", url.c_str(), static_cast<char*>(nullptr));
+        // if xdg-open isn't available, try sensible-browser (rare) then exit
+        execlp("sensible-browser", "sensible-browser", url.c_str(), static_cast<char*>(nullptr));
+        _exit(EXIT_FAILURE);
+    }
+    return true;
+#endif
+}
+
 static void shutdown(struct tray_menu *item) {
     Interface::Minimize();
     tts.Initialize();
     stt.Initialize();
     tts.Shutdown(); // fix konamask (virt input) not destroying
-    // add thread destruction
+}
+// kind of wasteful, but can't find another way 
+static inline void support(struct tray_menu *item) {
+    if (!open_url("https://nightvoid.com/support")) {
+        std::cout << "[ERROR] Could not open support email URL!" << std::endl;
+    } 
+    else {  std::cout << "[INFO] Email URL oppened!" << std::endl;  }
 }
 
-static void openui(struct tray_menu *item) {
-
+static inline void konacode(struct tray_menu *item) {
+    if (!open_url("https://konacode.com/")) {
+        std::cout << "[ERROR] Could not open URL!" << std::endl;
+    } 
+    else {  std::cout << "[INFO] URL oppened successfully!" << std::endl;  }
 }
 
-struct tray tray = {
+static inline void github(struct tray_menu *item) {
+    if (!open_url("https://github.com/kona-code")) {
+        std::cout << "[ERROR] Could not open URL!" << std::endl;
+    } 
+    else {  std::cout << "[INFO] URL oppened successfully!" << std::endl;  }
+}
+
+static inline void nightvoid(struct tray_menu *item) {
+    if (!open_url("https://nightvoid.com/")) {
+        std::cout << "[ERROR] Could not open URL!" << std::endl;
+    } 
+    else {  std::cout << "[INFO] URL oppened successfully!" << std::endl;  }
+}
+
+static inline void software(struct tray_menu *item) {
+    if (!open_url("https://software.nightvoid.com/")) {
+        std::cout << "[ERROR] Could not open URL!" << std::endl;
+    } 
+    else {  std::cout << "[INFO] URL oppened successfully!" << std::endl;  }
+}
+
+static inline void openui(struct tray_menu *item) {
+    Interface::Show();
+}
+static inline void kill(struct tray_menu *item) {
+    std::exit(EXIT_SUCCESS);
+}
+
+static struct tray tray = {
     .icon = TRAY_ICON1,
-    .menu = (struct tray_menu[]){{"Toggle me", 0, 0, openui, NULL},
-                                 {"-", 0, 0, NULL, NULL},
-                                 {"Quit", 0, 0, shutdown, NULL},
-                                 {NULL, 0, 0, NULL, NULL}},
+    .menu =
+        (struct tray_menu[]){
+            {.text = "Show Window", .cb = openui},
+            {.text = "-"},
+            {.text = "konacode",
+             .submenu =
+                 (struct tray_menu[]){
+                     {.text = "website", .cb = konacode},
+                     {.text = "GitHub", .cb = github},
+                     {.text = NULL}}},
+              {.text = "NightVoid",
+               .submenu =
+                 (struct tray_menu[]){
+                     {.text = "website", .cb = nightvoid},
+                     {.text = "software", .cb = software},
+                     {.text = "support", .cb = support},
+              {.text = NULL}}},
+            {.text = "-"},
+            {.text = "Kill", .cb = kill},
+            {.text = "Quit", .cb = shutdown},
+            {.text = NULL}},
 };
 
 static bool first() {
@@ -97,20 +194,20 @@ int main() {
     "        occcccccccccccccccclcc:c:.;lccdlcccccccccccllcccck,       / ,< / /_/ / / / / /_/ / /__/ /_/ / /_/ /  __/        \n"
     "       ,cccccc;.,;;,,',:ccllccc:c:.cllc:;ccccllcccccl,  .clO     /_/|_|\\____/_/ /_/\\__,_/\\___/\\____/\\__,_/\\___/   \n"
     "       lcccc;.......,:clccl':colcc,,c.:c...;cccooccccl:    '\n"
-    "       lcc:.....,;ccccclcc;..;cdocc,c,.,:....,:cd .cccl:                   Software developed by kona                    \n"
-    "       cc;.',;lccclccccocc....;lldc::c..::cox.l 'x  ,cco.          ┌─────────────────────────────────────────┐           \n"
-    "       ll:clcclccoccccccc:.....:;;occc'oO00dc.dl      cco              website: https://konacode.com/                    \n"
-    "      olclocclccolcccc,:c.......l.,occ,,kOxk..dd;      .l.             my projects: https://nightvoid.com/               \n"
-    "     k.,clccclcldcccc:.l;:ox0o..',.'oc;..::l .doo'                     github: https://github.com/kona-code/             \n"
+    "       lcc:.....,;ccccclcc;..;cdocc,c,.,:....,:cd .cccl:                   Software developed by kona                   \n"
+    "       cc;.',;lccclccccocc....;lldc::c..::cox.l 'x  ,cco.          ┌─────────────────────────────────────────┐          \n"
+    "       ll:clcclccoccccccc:.....:;;occc'oO00dc.dl      cco              website: https://konacode.com/                   \n"
+    "      olclocclccolcccc,:c.......l.,occ,,kOxk..dd;      .l.             my projects: https://nightvoid.com/              \n"
+    "     k.,clccclcldcccc:.l;:ox0o..',.'oc;..::l .doo'                     github: https://github.com/kona-code/            \n"
     "   '.  ,lccccocddcccc;o000Okk:......,l;..:;l..cdlo,         \n"
-    "       ,dcccoxldocccc.:oOxxkld ......:;.......'do:oc                   contact me here:                                  \n"
-    "       :lccdddodoccdd;... ,:,d,...............cddc:lk                  Discord: konacode                                 \n"
-    "       llcddddxddcdddo,...coc;........,,..... lddd::.x                 Email: kona@nightvoid.com                         \n"
-    "      'lldddddxddlddddl,...........;,'...';:    ddo:o.      \n"
-    "      olddddddddxloodddl;..............,c:c;     :dlcl                 more information:                                 \n"
-    "     dccdddddddxoooolodl...:,,,''';,;ldlllc       .ocl                 https://konacode.com/                             \n"
-    "    k:ccc:clodlllllllcl'..,ll:;,,,,,,odl:oo.       .cc                 https://nightvoid.com/                            \n"
-    "  'd;::.......',;::::c;...doccllc;,,'.dl;o:,        :c             └─────────────────────────────────────────┘           \n"
+    "       ,dcccoxldocccc.:oOxxkld ......:;.......'do:oc                   contact me here:                                 \n"
+    "       :lccdddodoccdd;... ,:,d,...............cddc:lk                  Discord: konacode                                \n"
+    "       llcddddxddcdddo,...coc;........,,..... lddd::.x                 Email: kona@nightvoid.com                        \n"
+    "      'lldddddxddlddddl,...........;,'...';:    ddo:o.             └─────────────────────────────────────────┘          \n"
+    "      olddddddddxloodddl;..............,c:c;     :dlcl      \n"
+    "     dccdddddddxoooolodl...:,,,''';,;ldlllc       .ocl      \n"
+    "    k:ccc:clodlllllllcl'..,ll:;,,,,,,odl:oo.       .cc      \n"
+    "  'd;::.......',;::::c;...doccllc;,,'.dl;o:,        :c      \n"
     " ll,:odl::;,'.............:ldolloo:.  :cco,.        .'      \n"
     "Oc:loddoddxc,';'....'.....ccclolclod:.:cdc'                 \n"
     "llldxdoxo:,'..;''',;;'''':ddllooodllllldl;.                 \n"
@@ -124,6 +221,7 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
+    ui.Render(&uiRunning);
     if (cfg.get<int>("enable_user_interface", true)) {
     std::cout << "[INFO] User interface has been enabled." << std::endl;
         ui.Initialize();

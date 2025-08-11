@@ -7,6 +7,7 @@ public:
     int Initialize();
     int Render(std::atomic<bool>* runningFlag);
     static void Minimize();
+    static void Show();
 
 private:
     Settings& cfg = Settings::GetInstance();

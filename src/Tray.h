@@ -1,4 +1,4 @@
-// (almost) entire code taken from https://github.com/zserge/tray/
+// most code taken from https://github.com/zserge/tray/
 
 #pragma once
 #ifndef TRAY_H

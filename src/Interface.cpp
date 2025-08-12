@@ -1,7 +1,9 @@
 // most initialization code was taken from: https://github.com/ocornut/imgui/
 
 #include "Interface.h"
+#include "TextToSpeech.h" // for manual voice output
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -73,6 +75,7 @@ struct TextureData {
 
     TextureData() { memset(this, 0, sizeof(*this)); }
 };
+
 
 static void check_vk_result(VkResult err) {
     if (err == VK_SUCCESS) 
@@ -1012,7 +1015,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.Colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.20f, 0.22f, 0.27f, 0.75f);
     style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(0.86f, 0.10f, 0.38f, 0.86f);
     style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.20f, 0.22f, 0.27f, 0.47f);
-    style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
+    style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 0.00f);
     style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 1.00f);
     style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.92f, 0.18f, 0.29f, 0.78f);
     style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
@@ -1129,6 +1132,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     // ───────────────────────────────────────────────────
     bool settings = false;
+    bool manual = false;
     bool debug_log = true;
     bool stats = cfg.get<bool>("enable_statistics", false);
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
@@ -1136,6 +1140,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     float r;
     float g;
     float b;
+    
+    static char manInput[128] = "";
     // validate range & convert to normalized floats
     //auto in_range = [](int v){ return (v >= 0 && v <= 255); }; defined above
     if (!in_range(cfg.get<int>("ui_bgc_red",   50)) || !in_range(cfg.get<int>("ui_bgc_green", 20)) || !in_range(cfg.get<int>("ui_bgc_blue",  60))) {
@@ -1154,8 +1160,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     TextureData* texture;
     bool ret = LoadTextureFromFile(image_path, texture);
     if (imgbg) {
-    IM_ASSERT(ret);
+        IM_ASSERT(ret);
     }
+
     while (runningFlag->load()) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -1188,9 +1195,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        if (settings)
-        {
-            ImGui::Begin("##GH-6002 Settings", &settings);
+        if (settings) {
+            ImGui::Begin("Settings", &settings);
             ImGui::Text("Change background color:");
             ImGui::ColorEdit3("background", (float*)&backgorund_color);
             //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
@@ -1210,6 +1216,18 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             }
             if (ImGui::Button("Close"))
                 settings = false;
+            ImGui::End();
+        }
+        if (manual) {
+            ImGui::Begin("Manual voice output", &manual);
+            ImGui::Text("Manual voice output:");
+            ImGui::InputTextWithHint("Limit: 128 characters", "Enter a word or sentence to speak out.", manInput, IM_ARRAYSIZE(manInput));
+            if (ImGui::Button("Speak through the microphone")) {
+                TextToSpeech::Verbalize(manInput);
+            }
+            ImGui::Spacing();
+            if (ImGui::Button("Close"))
+                manual = false;
             ImGui::End();
         }
         if (debug_log) {
@@ -1256,6 +1274,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SetNextWindowSize(ImGui::GetWindowSize());
             ImGui::Text("konamask voice transforming utility");
             ImGui::Checkbox("open settings", &settings);
+            ImGui::Checkbox("open manual voice output", &manual);
 
             ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
 

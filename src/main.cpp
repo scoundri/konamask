@@ -221,6 +221,8 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
+        tts.Initialize();
+
     ui.Render(&uiRunning);
     if (cfg.get<int>("enable_user_interface", true)) {
     std::cout << "[INFO] User interface has been enabled." << std::endl;

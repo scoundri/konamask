@@ -227,7 +227,7 @@ int main() {
     });
     cfg.Initialize();
     //tts.Initialize(); // debug/development
-    tts.Initialize();
+    //tts.Initialize();
     ui.Initialize();
     ui.Render(&uiRunning);
     //if (cfg.get<int>("enable_user_interface", true)) {

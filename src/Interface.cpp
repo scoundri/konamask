@@ -1123,67 +1123,62 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     //ImGui::StyleColorsLight();
 
     // apply user configuration
-    float rwbg;
-    float gwbg;
-    float bwbg;
+    float tcr;
+    float tcg;
+    float tcb;
     // validate range & convert to normalized floats
     auto in_range = [](int v){ return (v >= 0 && v <= 255); };
-    if (!in_range(cfg.get<int>("ui_bgc_red",   50)) || !in_range(cfg.get<int>("ui_bgc_green", 20)) || !in_range(cfg.get<int>("ui_bgc_blue",  60))) {
+    if (!in_range(cfg.get<int>("ui_theme_red",   50)) || !in_range(cfg.get<int>("ui_theme_green", 20)) || !in_range(cfg.get<int>("ui_theme_blue",  60))) {
         std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults.\n";
-        rwbg = static_cast<float>(50); gwbg = static_cast<float>(20); bwbg = static_cast<float>(60);
+        tcr = static_cast<float>(50); tcg = static_cast<float>(20); tcb = static_cast<float>(60);
     } 
     else {
-        // convert to normalized floats 0.0..1.0
-        rwbg = static_cast<float>(cfg.get<int>("ui_bgc_red",   50)) / 255.0f;
-        gwbg = static_cast<float>(cfg.get<int>("ui_bgc_green", 20)) / 255.0f;
-        bwbg = static_cast<float>(cfg.get<int>("ui_bgc_blue",  60)) / 255.0f;
+        // convert to normalized floats 0.0 - 1.0
+        tcr = static_cast<float>(cfg.get<int>("ui_theme_red",   167)) / 255.0f;
+        tcg = static_cast<float>(cfg.get<int>("ui_theme_green", 42)) / 255.0f;
+        tcb = static_cast<float>(cfg.get<int>("ui_theme_blue",  92)) / 255.0f;
     }
-
-
+    std::cout << "[INFO] Setting ImGui style theme color as following:\n[INFO] Red: " << tcr*255 << "  | (" << tcr << ")\n[INFO] Green: " << tcg*255 << "  | (" << tcg << ")\n[INFO] Blue: " << tcb*255 << "  | (" << tcb << ")" << std::endl; 
     // setup scaling
+    ImVec4 theme_color(tcr, tcg, tcb, 1.0f); // only needed for the GUI
 
     ImGuiStyle& style = ImGui::GetStyle();
     style.Colors[ImGuiCol_Text]                  = ImVec4(0.86f, 0.93f, 0.89f, 0.78f);
     style.Colors[ImGuiCol_TextDisabled]          = ImVec4(0.86f, 0.93f, 0.89f, 0.28f);
     style.Colors[ImGuiCol_WindowBg]              = ImVec4(0.05f, 0.06f, 0.12f, 0.86f);
-    if (cfg.get<bool>("enable_window_borders", true)) {
-        style.Colors[ImGuiCol_Border]                = ImVec4(0.02f, 0.03f, 0.09f, 0.86f);
-        style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.02f, 0.03f, 0.09f, 0.00f);
-    } else {
-        style.Colors[ImGuiCol_Border]                = ImVec4(0.02f, 0.03f, 0.09f, 0.00);
-        style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.02f, 0.03f, 0.09f, 0.00f);
-    }
+    style.Colors[ImGuiCol_Border]                = ImVec4(0.02f, 0.03f, 0.09f, 0.86f);
+    style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.02f, 0.03f, 0.09f, 0.00f);
     style.Colors[ImGuiCol_FrameBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.78f);
-    style.Colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
-    style.Colors[ImGuiCol_FrameBgActive]         = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_FrameBgHovered]        = ImVec4(tcr, tcg, tcb, 0.45f);
+    style.Colors[ImGuiCol_FrameBgActive]         = ImVec4(tcr, tcg, tcb, 0.72f);
     style.Colors[ImGuiCol_TitleBg]               = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
     style.Colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.20f, 0.22f, 0.27f, 0.75f);
-    style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(0.86f, 0.10f, 0.38f, 0.86f);
+    style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(tcr, tcg, tcb, 0.86f);
     style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.20f, 0.22f, 0.27f, 0.47f);
     style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 0.00f);
-    style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 1.00f);
-    style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.92f, 0.18f, 0.29f, 0.78f);
-    style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
-    style.Colors[ImGuiCol_CheckMark]             = ImVec4(0.71f, 0.22f, 0.27f, 1.00f);
-    style.Colors[ImGuiCol_SliderGrab]            = ImVec4(0.47f, 0.77f, 0.83f, 0.14f);
-    style.Colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 0.86f);
+    style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(tcr, tcg, tcb, 0.36f);
+    style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(tcr, tcg, tcb, 0.86f);
+    style.Colors[ImGuiCol_CheckMark]             = ImVec4(tcr, tcg, tcb, 1.00f);
+    style.Colors[ImGuiCol_SliderGrab]            = ImVec4(tcr, tcg, tcb, 0.96f);
+    style.Colors[ImGuiCol_SliderGrabActive]      = ImVec4(tcr, tcg, tcb, 0.10f);
     style.Colors[ImGuiCol_Button]                = ImVec4(0.47f, 0.77f, 0.83f, 0.14f);
-    style.Colors[ImGuiCol_ButtonHovered]         = ImVec4(0.92f, 0.18f, 0.29f, 0.86f);
-    style.Colors[ImGuiCol_ButtonActive]          = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
-    style.Colors[ImGuiCol_Header]                = ImVec4(0.92f, 0.18f, 0.29f, 0.76f);
-    style.Colors[ImGuiCol_HeaderHovered]         = ImVec4(0.92f, 0.18f, 0.29f, 0.86f);
-    style.Colors[ImGuiCol_HeaderActive]          = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_ButtonHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
+    style.Colors[ImGuiCol_ButtonActive]          = ImVec4(tcr, tcg, tcb, 1.00f);
+    style.Colors[ImGuiCol_Header]                = ImVec4(tcr, tcg, tcb, 0.76f);
+    style.Colors[ImGuiCol_HeaderHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
+    style.Colors[ImGuiCol_HeaderActive]          = ImVec4(tcr, tcg, tcb, 0.86f);
     style.Colors[ImGuiCol_Separator]             = ImVec4(0.14f, 0.16f, 0.19f, 1.00f);
-    style.Colors[ImGuiCol_SeparatorHovered]      = ImVec4(0.92f, 0.18f, 0.29f, 0.78f);
-    style.Colors[ImGuiCol_SeparatorActive]       = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_SeparatorHovered]      = ImVec4(tcr, tcg, tcb, 0.78f);
+    style.Colors[ImGuiCol_SeparatorActive]       = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_ResizeGrip]            = ImVec4(0.47f, 0.77f, 0.83f, 0.04f);
-    style.Colors[ImGuiCol_ResizeGripHovered]     = ImVec4(0.92f, 0.18f, 0.29f, 0.78f);
-    style.Colors[ImGuiCol_ResizeGripActive]      = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_ResizeGripHovered]     = ImVec4(tcr, tcg, tcb, 0.78f);
+    style.Colors[ImGuiCol_ResizeGripActive]      = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_PlotLines]             = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
-    style.Colors[ImGuiCol_PlotLinesHovered]      = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
+    style.Colors[ImGuiCol_PlotLinesHovered]      = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_PlotHistogram]         = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
-    style.Colors[ImGuiCol_PlotHistogramHovered]  = ImVec4(0.92f, 0.18f, 0.29f, 1.00f);
-    style.Colors[ImGuiCol_TextSelectedBg]        = ImVec4(0.92f, 0.18f, 0.29f, 0.43f);
+    style.Colors[ImGuiCol_PlotHistogramHovered]  = ImVec4(tcr, tcg, tcb, 1.00f);
+    style.Colors[ImGuiCol_TextSelectedBg]        = ImVec4(tcr, tcg, tcb, 0.45f);
     style.Colors[ImGuiCol_PopupBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.9f);
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
@@ -1298,7 +1293,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         r = static_cast<float>(50); g = static_cast<float>(20); b = static_cast<float>(60);
     } 
     else {
-        // convert to normalized floats 0.0..1.0
+        // convert to normalized floats 0.0 - 1.0
         r = static_cast<float>(cfg.get<int>("ui_bgc_red",   50)) / 255.0f;
         g = static_cast<float>(cfg.get<int>("ui_bgc_green", 20)) / 255.0f;
         b = static_cast<float>(cfg.get<int>("ui_bgc_blue",  60)) / 255.0f;
@@ -1390,8 +1385,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 } 
                 else {
                     ImGui::Text("Change background color:");
-                    ImGui::ColorEdit3("background", (float*)&backgorund_color);
+                    ImGui::ColorEdit3("", (float*)&backgorund_color);
                 }
+                ImGui::Text("Change theme color:");
+                ImGui::ColorEdit3("", (float*)&theme_color);
                 //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
                 if (ImGui::Button("Save")) {
                     std::cout << "[INFO] Saving settings..." << std::endl;
@@ -1401,10 +1398,20 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                             cfg.set<int>("ui_bgc_red", r*255);
                             cfg.set<int>("ui_bgc_green", g*255);
                             cfg.set<int>("ui_bgc_blue", b*255);
+                            std::cout << "[INFO] Background color updated successfully!" << std::endl;
                         }
                         catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
-                        std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                        
                     } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
+                    ImVec4ToFloats({tcr,tcg,tcb,0});
+                    try {
+                        cfg.set<int>("ui_theme_red", tcr*255);
+                        cfg.set<int>("ui_theme_green", tcg*255);
+                        cfg.set<int>("ui_theme_blue", tcb*255);
+                        std::cout << "[INFO] Theme color updated successfully!" << std::endl;
+                        
+                    }
+                    catch (...) {   std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; }
                     if (cfg.SaveToFile(config_path)) {
                         std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                     } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }

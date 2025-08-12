@@ -228,8 +228,8 @@ int main() {
     cfg.Initialize();
     //tts.Initialize(); // debug/development
     tts.Initialize();
-    //ui.Initialize();
-    //ui.Render(&uiRunning);
+    ui.Initialize();
+    ui.Render(&uiRunning);
     //if (cfg.get<int>("enable_user_interface", true)) {
     //std::cout << "[INFO] User interface has been enabled." << std::endl;
         

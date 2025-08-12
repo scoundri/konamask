@@ -27,6 +27,11 @@
 #include <stb/stb_image.h> // for texture (image) loading
 #include <fstream> // for CheckFile and CopyFile
 #include <sys/stat.h> // for CheckFile and CopyFile
+#include <filesystem>
+#include <vector>
+#include <chrono>
+#include <algorithm>
+#include <string>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -76,6 +81,138 @@ struct TextureData {
 
     TextureData() { memset(this, 0, sizeof(*this)); }
 };
+
+struct ImGuiFilePicker {
+    
+    std::filesystem::path current_path = std::filesystem::current_path();
+    std::vector<std::string> image_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}; // .webp usually cause an exception
+    std::string selected_path;
+    std::string filter; // filter string (e.g. "*.png;*.jpg") - not implemented, reserved
+    std::chrono::steady_clock::time_point last_click_time = std::chrono::steady_clock::now(); // last click time to detect double-click
+    std::string last_clicked_item;
+
+    // draw the widget > returns true when the user double-clicks a file (selection made)
+    bool Draw(const char* title, bool* p_open, std::string* out_selected_path = nullptr) {
+        if (p_open && !*p_open) return false;
+
+        bool selection_made = false;
+
+        ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin(title, p_open)) {
+            ImGui::End();
+            return false;
+        }
+
+        // path breadcrumb
+        DrawBreadcrumb();
+
+        ImGui::Separator();
+
+        // two columns > directories on left, files on right
+        ImGui::Columns(2, "filepicker_cols", true);
+        DrawDirectoriesColumn();
+        ImGui::NextColumn();
+        DrawFilesColumn(&selection_made);
+        ImGui::Columns(1);
+
+        ImGui::End();
+
+        if (selection_made && out_selected_path) {
+            *out_selected_path = selected_path;
+        }
+        return selection_made;
+    }
+private:
+    void DrawBreadcrumb() {
+        std::string accum;
+        ImGui::TextDisabled("current:"); ImGui::SameLine();
+        // build clickable path pieces
+        for (auto it = current_path.begin(); it != current_path.end(); ++it) {
+            if (it != current_path.begin()) ImGui::SameLine();
+            std::string part = it->string();
+            if (ImGui::Button(part.c_str())) {
+                // assemble path up to this element
+                std::filesystem::path p;
+                for (auto jt = current_path.begin(); jt != it; ++jt) p /= *jt;
+                p /= *it;
+                if (std::filesystem::exists(p) && std::filesystem::is_directory(p)) current_path = p;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("..")) {
+            if (current_path.has_parent_path()) current_path = current_path.parent_path();
+        }
+    }
+
+    void DrawDirectoriesColumn() {
+        ImGui::Text("folders");
+        ImGui::Separator();
+
+        // enumerate directories
+        std::error_code ec;
+        std::vector<std::filesystem::directory_entry> dirs;
+        for (auto &de : std::filesystem::directory_iterator(current_path, std::filesystem::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (de.is_directory(ec)) dirs.push_back(de);
+        }
+
+        // sort by name
+        std::sort(dirs.begin(), dirs.end(), [](auto &a, auto &b){ return a.path().filename().string() < b.path().filename().string(); });
+
+        // display
+        ImGui::BeginChild("##dirs", ImVec2(0,0), false, ImGuiWindowFlags_HorizontalScrollbar);
+        for (auto &d : dirs) {
+            std::string name = d.path().filename().string();
+            if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick)) {
+                if (ImGui::IsMouseDoubleClicked(0)) {
+                    // enter directory on double click
+                    current_path /= name;
+                }
+            }
+        }
+        ImGui::EndChild();
+    }
+
+    void DrawFilesColumn(bool* selection_made) {
+        ImGui::Text("files");
+        ImGui::Separator();
+
+        std::error_code ec;
+        std::vector<std::filesystem::directory_entry> files;
+        for (auto &de : std::filesystem::directory_iterator(current_path, std::filesystem::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (de.is_regular_file(ec)) {
+                auto ext = de.path().extension().string();
+                // lowercase ext
+                std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
+                if (std::find(image_exts.begin(), image_exts.end(), ext) != image_exts.end()) files.push_back(de);
+            }
+        }
+
+        std::sort(files.begin(), files.end(), [](auto &a, auto &b){ return a.path().filename().string() < b.path().filename().string(); });
+
+        ImGui::BeginChild("##files", ImVec2(0,0), false, ImGuiWindowFlags_HorizontalScrollbar);
+        for (auto &f : files) {
+            std::string name = f.path().filename().string();
+            bool selected = (selected_path == f.path().string());
+            if (ImGui::Selectable(name.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick)) {
+                // single click selects
+                selected_path = f.path().string();
+
+                // detect double click (using ImGui builtin)
+                if (ImGui::IsMouseDoubleClicked(0)) {
+                    // choose file
+                    if (std::find(image_exts.begin(), image_exts.end(), f.path().extension().string()) != image_exts.end()) {
+                        selected_path = f.path().string();
+                        if (selection_made) *selection_made = true;
+                    }
+                }
+            }
+        }
+        ImGui::EndChild();
+    }
+};
+
 
 
 static void check_vk_result(VkResult err) {
@@ -929,7 +1066,7 @@ void RemoveTexture(TextureData* tex_data) {
     ImGui_ImplVulkan_RemoveTexture(tex_data->DS);
 }
 
-/*#include "OpenFileManager.hpp"
+/*#include "OpenFileManager.hpp" // borked
 static inline void OpenInFM() {
     char image_path[PATH_MAX];
     snprintf(image_path, sizeof(image_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/background");
@@ -1143,6 +1280,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     // ───────────────────────────────────────────────────
     bool settings = false;
+    bool budgetfm = false;
+    bool bgsuccess;
     bool manual = false;
     bool debug_log = false;
     bool stats = cfg.get<bool>("enable_statistics", false);
@@ -1175,7 +1314,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     if (imgbg) {
         IM_ASSERT(ret);
     }
+
+    ImGuiFilePicker picker;
+    std::string out_path;
     SDL_Event event;
+    int fb_width, fb_height;
     while (runningFlag->load()) {
         
         while (SDL_PollEvent(&event)) {
@@ -1194,7 +1337,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             continue;
         }
         // resize swap chain?
-        int fb_width, fb_height;
         SDL_GetWindowSize(window, &fb_width, &fb_height);
         if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height)) {
             ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
@@ -1208,36 +1350,54 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        if (settings) {
-            ImGui::Begin("Settings", &settings);
-            if (imgbg) { 
-                ImGui::Text("Change background image:");
 
-            } 
-            else {
-                ImGui::Text("Change background color:");
-                ImGui::ColorEdit3("background", (float*)&backgorund_color);
-            }
-            //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
-            if (ImGui::Button("Save")) {
-                std::cout << "[INFO] Saving settings..." << std::endl;
-                ImVec4ToFloats({r,g,b,0});
-                if (!imgbg) {
-                    try {
-                        cfg.set<int>("ui_bgc_red", r*255);
-                        cfg.set<int>("ui_bgc_green", g*255);
-                        cfg.set<int>("ui_bgc_blue", b*255);
+            if (settings) {
+                ImGui::Begin("Settings", &settings);
+                if (imgbg) { 
+                    ImGui::Text("Change background image:");
+                    if (budgetfm) {
+                        if (picker.Draw("pick an image", &budgetfm, &out_path)) {
+                            printf("[INFO] Selected new background: %s\n[INFO] Replacing the current image...\n", out_path.c_str());
+                                if (CopyFile(out_path,image_path)) {
+                                    RemoveTexture(&texture);
+                                    ret = LoadTextureFromFile(image_path, &texture);
+                                    IM_ASSERT(ret);
+                                    std::cout << "[INFO] Applied new image successfully!" << std::endl;
+                                    bgsuccess = true;
+                                } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = false; }
+                            budgetfm = false;
+                        }
                     }
-                    catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
-                    std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
-                if (cfg.SaveToFile(config_path)) {
-                    std::cout << "[INFO] Successfully applied all settings!" << std::endl;
-                } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
-            }
-            if (ImGui::Button("Close"))
-                settings = false;
-            ImGui::End();
+                    else {
+                        if (ImGui::Button("Select new background"))
+                            budgetfm = true;
+                    }
+
+                } 
+                else {
+                    ImGui::Text("Change background color:");
+                    ImGui::ColorEdit3("background", (float*)&backgorund_color);
+                }
+                //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
+                if (ImGui::Button("Save")) {
+                    std::cout << "[INFO] Saving settings..." << std::endl;
+                    ImVec4ToFloats({r,g,b,0});
+                    if (!imgbg) {
+                        try {
+                            cfg.set<int>("ui_bgc_red", r*255);
+                            cfg.set<int>("ui_bgc_green", g*255);
+                            cfg.set<int>("ui_bgc_blue", b*255);
+                        }
+                        catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
+                        std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                    } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
+                    if (cfg.SaveToFile(config_path)) {
+                        std::cout << "[INFO] Successfully applied all settings!" << std::endl;
+                    } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
+                }
+                if (ImGui::Button("Close"))
+                    settings = false;
+                ImGui::End();
         }
         if (manual) {
             ImGui::Begin("Manual voice output", &manual);

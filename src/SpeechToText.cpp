@@ -1,5 +1,4 @@
 #include "SpeechToText.h"
-#include <cstddef>
 #include <cstdint>
 #include <iostream>
 

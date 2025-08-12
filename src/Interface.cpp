@@ -1183,7 +1183,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
     io.Fonts->Clear();
-    if (cfg.get<std::string>("ui_custom_font", "") != "disable" || cfg.get<std::string>("ui_custom_font", "") != "false") {
+    if (cfg.get<std::string>("ui_custom_font", "") != "false") {
         io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
     }
     else {
@@ -1275,21 +1275,27 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
     // configuration variables (currently no way of avoiding)
     //tts
-    unsigned short sr = cfg.get<int>("speech_rate", 150);
-    unsigned short sp = cfg.get<int>("speech_pitch", 50);
-    unsigned short sv = cfg.get<int>("speech_volume", 100);
-    unsigned int sthreshold = cfg.get<int>("silence_threshold", 200);
-    unsigned int stimeout = cfg.get<int>("silence_timeout", 1000);
+    int sr = cfg.get<int>("speech_rate", 150);
+    int sp = cfg.get<int>("speech_pitch", 50);
+    int sv = cfg.get<int>("speech_volume", 100);
+    std::string voicebank = cfg.get<std::string>("speech_vociebank", "en-us");
+    voicebank.reserve(256);
+    voicebank.resize(voicebank.size());
     //stt
     std::string voskapi = cfg.get<std::string>("voskapi_model_path", "./model");
     voskapi.reserve(256);
     voskapi.resize(voskapi.size());
-    std::string voicebank = cfg.get<std::string>("speech_vociebank", "en-us");
-    voicebank.reserve(256);
-    voicebank.resize(voicebank.size());
+    unsigned int sthreshold = cfg.get<int>("silence_threshold", 200);
+    unsigned int stimeout = cfg.get<int>("silence_timeout", 1000);
     // advanced
     int pasamplerate = cfg.get<int>("pa_sample_spec_rate", 22050);
     double bufferfactor = cfg.get<double>("buffer_factor", 0.05);
+
+    std::string fontdir = cfg.get<std::string>("ui_custom_font", "false");
+    fontdir.reserve(256);
+    fontdir.resize(fontdir.size());
+    int fontsize = cfg.get<int>("ui_font_size", 14);
+    
 
     // rendering variables
     bool settings = false;
@@ -1369,7 +1375,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::SeparatorText("dashboard customization");
 
                 if (imgbg) { 
-                    ImGui::Text("Change background image:");
+                    ImGui::Text("Change background imAage:");
                     if (budgetfm) {
                         ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
                         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
@@ -1394,12 +1400,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                         if (bgsuccess == 's') {
                             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(18,192,18,255));
                             ImGui::Text("Successfully updated the background!");
-                            ImGui::Spacing();
                             ImGui::PopStyleColor();
                         } else if (bgsuccess == 'f') {
                             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(242,37,85,255));
                             ImGui::Text("Failed to update the background!");
-                            ImGui::Spacing();
                             ImGui::PopStyleColor();                        
                         }
                     }
@@ -1410,24 +1414,29 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                     ImGui::Text("Change background color:");
                     ImGui::ColorEdit3("", (float*)&backgorund_color);
                 }
+                ImGui::Spacing();
                 ImGui::Text("Change theme color:");
-                ImGui::ColorEdit3("", (float*)&theme_color);
-                //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
+                ImGui::ColorEdit3("", (float*)&theme_color); ImGui::Spacing();
+                ImGui::Text("Add custom fonts:");
+                ImGui::InputText("Font (.ttf) path", const_cast<char*>(fontdir.c_str()), fontdir.capacity()+1, flags, ResizeCallback, (void*)&fontdir); ImGui::Spacing();
+                ImGui::InputInt("Font size", (int*)&fontsize);
                 ImGui::SeparatorText("text-to-speech");
+                ImGui::Text("Voicebank");
+                ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank); ImGui::Spacing();
+                ImGui::Text("Voice variables");
                 ImGui::InputInt("Speech rate", (int*)&sr);
                 ImGui::InputInt("Speech pitch", (int*)&sp);
                 ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
-                ImGui::InputInt("Silence threshold", (int*)&sthreshold);
-                ImGui::InputInt("Silence timeout", (int*)&stimeout);
                 ImGui::SeparatorText("speech-to-text");
                 ImGui::Text("Vosk-API model");
-                ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi);
-                ImGui::Text("Voicebank");
-                ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank);
+                ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi); ImGui::Spacing();
+                ImGui::Text("Detection values");
+                ImGui::InputInt("Silence threshold", (int*)&sthreshold);
+                ImGui::InputInt("Silence timeout", (int*)&stimeout);
                 ImGui::SeparatorText("advanced parameters");
                 ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
                 ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
-                ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor);
+                ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
                 ImGui::SeparatorText("");
                 if (ImGui::Button("Save")) {
                     std::cout << "[INFO] Saving settings..." << std::endl;
@@ -1438,19 +1447,36 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                             cfg.set<int>("ui_bgc_green", g*255);
                             cfg.set<int>("ui_bgc_blue", b*255);
                             std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                        }
-                        catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
+                        } catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
                         
                     } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
                     ImVec4ToFloats({tcr,tcg,tcb,0});
                     try {
-                        cfg.set<int>("ui_theme_red", tcr*255);
+                        cfg.set<int>("ui_theme_red", tcr*255); // TODO: fix values not updating
                         cfg.set<int>("ui_theme_green", tcg*255);
                         cfg.set<int>("ui_theme_blue", tcb*255);
                         std::cout << "[INFO] Theme color updated successfully!" << std::endl;
                         
-                    }
-                    catch (...) {   std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; }
+                    } catch (...) {   std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; }
+                    try {
+                        cfg.set<int>("speech_rate", sr);
+                        cfg.set<int>("speech_pitch", sp);
+                        cfg.set<int>("speech_volume", sv);
+                        cfg.set<std::string>("speech_vociebank", voicebank);
+                        std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
+                    } catch (...) {   std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; }
+                    try {
+                        cfg.set<int>("silence_threshold", sthreshold);
+                        cfg.set<int>("silence_timeout", stimeout);
+                        cfg.set<std::string>("voskapi_model_path", voskapi);
+                        std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
+                    } catch (...) {   std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; }
+                    try {
+                        cfg.set<int>("pa_sample_spec_rate", pasamplerate);
+                        cfg.set<int>("buffer_factor", bufferfactor);
+                        std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
+                    } catch (...) {   std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; }
+                    
                     if (cfg.SaveToFile(config_path)) {
                         std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                     } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }

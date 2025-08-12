@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_impl_sdl2.h"
+#include <linux/limits.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
@@ -997,6 +998,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
 
     // setup scaling
+
     ImGuiStyle& style = ImGui::GetStyle();
     style.Colors[ImGuiCol_Text]                  = ImVec4(0.86f, 0.93f, 0.89f, 0.78f);
     style.Colors[ImGuiCol_TextDisabled]          = ImVec4(0.86f, 0.93f, 0.89f, 0.28f);
@@ -1133,7 +1135,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // ───────────────────────────────────────────────────
     bool settings = false;
     bool manual = false;
-    bool debug_log = true;
+    bool debug_log = false;
     bool stats = cfg.get<bool>("enable_statistics", false);
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
     bool imgbg = (CheckFile(image_path));
@@ -1162,9 +1164,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     if (imgbg) {
         IM_ASSERT(ret);
     }
-
+    SDL_Event event;
     while (runningFlag->load()) {
-        SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
@@ -1197,19 +1198,29 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
         if (settings) {
             ImGui::Begin("Settings", &settings);
-            ImGui::Text("Change background color:");
-            ImGui::ColorEdit3("background", (float*)&backgorund_color);
+            if (imgbg) { 
+                ImGui::Text("Change background image:");
+                // ImGui::InputTextWithHint("Enter image path.", "Enter image path.", usr, IM_ARRAYSIZE(usr));
+                if (ImGui::Button("Close"))
+                    settings = false;
+            } 
+            else {
+                ImGui::Text("Change background color:");
+                ImGui::ColorEdit3("background", (float*)&backgorund_color);
+            }
             //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
             if (ImGui::Button("Save")) {
                 std::cout << "[INFO] Saving settings..." << std::endl;
                 ImVec4ToFloats({r,g,b,0});
-                try {
-                    cfg.set<int>("ui_bgc_red", r*255);
-                    cfg.set<int>("ui_bgc_green", g*255);
-                    cfg.set<int>("ui_bgc_blue", b*255);
-                }
-                catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
-                std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                if (!imgbg) {
+                    try {
+                        cfg.set<int>("ui_bgc_red", r*255);
+                        cfg.set<int>("ui_bgc_green", g*255);
+                        cfg.set<int>("ui_bgc_blue", b*255);
+                    }
+                    catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
+                    std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
                 if (cfg.SaveToFile(config_path)) {
                     std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                 } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
@@ -1275,6 +1286,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Text("konamask voice transforming utility");
             ImGui::Checkbox("open settings", &settings);
             ImGui::Checkbox("open manual voice output", &manual);
+            ImGui::Checkbox("open ImGui debug log", &debug_log);
 
             ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
 

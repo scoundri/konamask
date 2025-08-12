@@ -146,7 +146,6 @@ private:
 
     void DrawDirectoriesColumn() {
         ImGui::Text("folders");
-        ImGui::Separator();
 
         // enumerate directories
         std::error_code ec;
@@ -155,7 +154,6 @@ private:
             if (ec) break;
             if (de.is_directory(ec)) dirs.push_back(de);
         }
-
         // sort by name
         std::sort(dirs.begin(), dirs.end(), [](auto &a, auto &b){ return a.path().filename().string() < b.path().filename().string(); });
 
@@ -176,7 +174,6 @@ private:
     void DrawFilesColumn(bool* selection_made) {
         ImGui::Text("files");
         ImGui::Separator();
-
         std::error_code ec;
         std::vector<std::filesystem::directory_entry> files;
         for (auto &de : std::filesystem::directory_iterator(current_path, std::filesystem::directory_options::skip_permission_denied, ec)) {
@@ -1280,8 +1277,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     // ───────────────────────────────────────────────────
     bool settings = false;
-    bool budgetfm = false;
-    bool bgsuccess;
+    bool budgetfm = false;    
+    char bgsuccess = 'u'; // unset
     bool manual = false;
     bool debug_log = false;
     bool stats = cfg.get<bool>("enable_statistics", false);
@@ -1356,6 +1353,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 if (imgbg) { 
                     ImGui::Text("Change background image:");
                     if (budgetfm) {
+                        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+                        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+                        ImGui::Button("Select new background");
+                        ImGui::PopItemFlag();
+                        ImGui::PopStyleVar();
                         if (picker.Draw("pick an image", &budgetfm, &out_path)) {
                             printf("[INFO] Selected new background: %s\n[INFO] Replacing the current image...\n", out_path.c_str());
                                 if (CopyFile(out_path,image_path)) {
@@ -1363,15 +1365,27 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                                     ret = LoadTextureFromFile(image_path, &texture);
                                     IM_ASSERT(ret);
                                     std::cout << "[INFO] Applied new image successfully!" << std::endl;
-                                    bgsuccess = true;
-                                } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = false; }
+                                    bgsuccess = 's'; // set
+                                } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = 'f'; } // fail
                             budgetfm = false;
                         }
                     }
                     else {
                         if (ImGui::Button("Select new background"))
                             budgetfm = true;
+                        if (bgsuccess == 's') {
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(18,192,18,255));
+                            ImGui::Text("Successfully updated the background!");
+                            ImGui::Spacing();
+                            ImGui::PopStyleColor();
+                        } else if (bgsuccess == 'f') {
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(242,37,85,255));
+                            ImGui::Text("Failed to update the background!");
+                            ImGui::Spacing();
+                            ImGui::PopStyleColor();                        
+                        }
                     }
+
 
                 } 
                 else {
@@ -1450,7 +1464,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
             static float f = 0.0f;
-            static int counter = 0;
             ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
             ImGui::SetNextWindowSize(ImGui::GetWindowSize());
             ImGui::Text("konamask voice transforming utility");
@@ -1460,8 +1473,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
             ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
 
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
             if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
             if (ImGui::Button("Minimize")) {
                 Minimize();

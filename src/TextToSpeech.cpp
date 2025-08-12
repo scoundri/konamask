@@ -67,7 +67,7 @@ Settings& cfg = Settings::GetInstance();
         }
     } 
     std::cout << "[INFO] Successfully loaded voicebank!" << std::endl;
-    espeak_SetParameter(espeakRATE, cfg.get<int>("speech_rate", 150), 0);   // default ~175 wpm
+    espeak_SetParameter(espeakRATE, cfg.get<int>("speech_rate", 150), 0);   // default ~150 wpm
     std::cout << "[INFO] Speech rate has been set to \"" << cfg.get<int>("speech_rate", 150) << "\"." << std::endl;
     espeak_SetParameter(espeakPITCH, cfg.get<int>("speech_pitch", 50), 0);   // default 50
     std::cout << "[INFO] Speech pitch has been set to \"" << cfg.get<int>("speech_pitch", 50) << "\"." << std::endl;

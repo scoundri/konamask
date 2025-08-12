@@ -1063,15 +1063,15 @@ void RemoveTexture(TextureData* tex_data) {
     ImGui_ImplVulkan_RemoveTexture(tex_data->DS);
 }
 
-/*#include "OpenFileManager.hpp" // borked
-static inline void OpenInFM() {
-    char image_path[PATH_MAX];
-    snprintf(image_path, sizeof(image_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/background");
-    if (!util::open_in_file_manager(image_path, false)) {
-        std::cerr << "[ERROR] Failed to open file manager\n";
+static int ResizeCallback(ImGuiInputTextCallbackData* data) { // for string usage inside ImGui::InputText()
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        // user-data is the std::string pointer
+        std::string* str = (std::string*)data->UserData;
+        str->resize(data->BufTextLen); // resize string to new text length (not counting null)
+        data->Buf = const_cast<char*>(str->c_str()); // update ImGui's buffer pointer
     }
-}*/
-
+    return 0;
+}
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // configuration path
@@ -1271,6 +1271,27 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
     }
     // ───────────────────────────────────────────────────
+
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
+    // configuration variables (currently no way of avoiding)
+    //tts
+    unsigned short sr = cfg.get<int>("speech_rate", 150);
+    unsigned short sp = cfg.get<int>("speech_pitch", 50);
+    unsigned short sv = cfg.get<int>("speech_volume", 100);
+    unsigned int sthreshold = cfg.get<int>("silence_threshold", 200);
+    unsigned int stimeout = cfg.get<int>("silence_timeout", 1000);
+    //stt
+    std::string voskapi = cfg.get<std::string>("voskapi_model_path", "./model");
+    voskapi.reserve(256);
+    voskapi.resize(voskapi.size());
+    std::string voicebank = cfg.get<std::string>("speech_vociebank", "en-us");
+    voicebank.reserve(256);
+    voicebank.resize(voicebank.size());
+    // advanced
+    int pasamplerate = cfg.get<int>("pa_sample_spec_rate", 22050);
+    double bufferfactor = cfg.get<double>("buffer_factor", 0.05);
+
+    // rendering variables
     bool settings = false;
     bool budgetfm = false;    
     char bgsuccess = 'u'; // unset
@@ -1345,6 +1366,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
             if (settings) {
                 ImGui::Begin("Settings", &settings);
+                ImGui::SeparatorText("dashboard customization");
+
                 if (imgbg) { 
                     ImGui::Text("Change background image:");
                     if (budgetfm) {
@@ -1390,6 +1413,22 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::Text("Change theme color:");
                 ImGui::ColorEdit3("", (float*)&theme_color);
                 //ImGui::InputTextWithHint("Vosk-API Model", "Vosk-API Model Path", cfg.<std::string>("voskapi_model_path").c_str(), IM_ARRAYSIZE(cfg.get<std::string>("voskapi_model_path").c_str()));
+                ImGui::SeparatorText("text-to-speech");
+                ImGui::InputInt("Speech rate", (int*)&sr);
+                ImGui::InputInt("Speech pitch", (int*)&sp);
+                ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
+                ImGui::InputInt("Silence threshold", (int*)&sthreshold);
+                ImGui::InputInt("Silence timeout", (int*)&stimeout);
+                ImGui::SeparatorText("speech-to-text");
+                ImGui::Text("Vosk-API model");
+                ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi);
+                ImGui::Text("Voicebank");
+                ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank);
+                ImGui::SeparatorText("advanced parameters");
+                ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
+                ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
+                ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor);
+                ImGui::SeparatorText("");
                 if (ImGui::Button("Save")) {
                     std::cout << "[INFO] Saving settings..." << std::endl;
                     ImVec4ToFloats({r,g,b,0});
@@ -1415,7 +1454,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                     if (cfg.SaveToFile(config_path)) {
                         std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                     } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
-                }
+                } ImGui::SameLine();
                 if (ImGui::Button("Close"))
                     settings = false;
                 ImGui::End();
@@ -1423,9 +1462,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (manual) {
             ImGui::Begin("Manual voice output", &manual);
             ImGui::Text("Manual voice output:");
-            ImGui::InputTextWithHint("Limit: 128 characters", "Enter a word or sentence to speak out.", manInput, IM_ARRAYSIZE(manInput));
+            ImGui::InputText("Limit: 128 characters", (char*)&manInput, IM_ARRAYSIZE(manInput));
             if (ImGui::Button("Speak through the microphone")) {
-                TextToSpeech::Verbalize(manInput);
+                TextToSpeech::Verbalize((char*)&manInput);
             }
             ImGui::Spacing();
             if (ImGui::Button("Close"))

@@ -135,7 +135,9 @@ static struct tray tray = {
 
 static bool first() {
     char path[PATH_MAX];
+    char backup[PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
+    snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config_backup.ini");
     struct stat info;
 
     if (stat(path, &info) != 0) {
@@ -173,7 +175,10 @@ static bool first() {
     else {
         std::cerr << "[INFO] Unable to download configuration file!\n[INFO] Download it from:"
                      "[INFO] konamask github repository: https://github.com/kona-code/konamask\n"
-                                                                    "[INFO] NightVoid archives: https://archive.nightvoid.com/Development/konamask/Backup%20configuration/ (URL might change in the future)" << std::endl;
+                     "[INFO] NightVoid archives: https://archive.nightvoid.com/Development/konamask/Backup%20configuration/ (URL might change in the future)" << std::endl;
+    }
+    if (Settings::CopyFile(path, backup)) {
+        std::cout << "[INFO] Configuration successfully backed-up!" << std::endl;
     }
     
     return true;
@@ -221,44 +226,45 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
-        tts.Initialize();
-
-    ui.Render(&uiRunning);
-    if (cfg.get<int>("enable_user_interface", true)) {
-    std::cout << "[INFO] User interface has been enabled." << std::endl;
-        ui.Initialize();
-        std::thread uiThread([&](){
-            try {
-                ui.Render(&uiRunning);
-            }
-            catch (const std::exception& e) {
-                std::cerr << "UI exception: " << e.what() << "\n"
-                          << "Falling back to console mode." << std::endl;
-                uiRunning = false;
-            }
-            catch (...) {
-                std::cerr << "Unexpected UI exception! Falling back to console mode." << std::endl;
-                uiRunning = false;
-            }
-        });
+    //tts.Initialize(); // debug/development
+    tts.Initialize();
+    //ui.Initialize();
+    //ui.Render(&uiRunning);
+    //if (cfg.get<int>("enable_user_interface", true)) {
+    //std::cout << "[INFO] User interface has been enabled." << std::endl;
         
-        tts.Initialize();
-        stt.Initialize();
-        tts.Shutdown(); // fix konamask (virt input) not destroying
+    std::thread uiThread([&](){
         try {
-            if (uiThread.joinable()) {
-                uiRunning = false;
-                uiThread.join();
-                std::cout << "[INFO] uiThread destroyed successfully!" << std::endl;
-            }
-        } catch (...) { std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; }
-        try {
-            if (trayThread.joinable()) {
-                trayThread.join();
-                std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
-            }
-        } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
-    }
+            ui.Initialize();
+            ui.Render(&uiRunning);
+        }
+        catch (const std::exception& e) {
+            std::cerr << "UI exception: " << e.what() << "\n"
+                      << "Falling back to console mode." << std::endl;
+            uiRunning = false;
+        }
+        catch (...) {
+            std::cerr << "Unexpected UI exception! Falling back to console mode." << std::endl;
+            uiRunning = false;
+        }
+    });
+    
+    stt.Initialize();  
+    tts.Shutdown(); // fix konamask (virt input) not destroying
+    try {
+        if (uiThread.joinable()) {
+            uiRunning = false;
+            uiThread.join();
+            std::cout << "[INFO] uiThread destroyed successfully!" << std::endl;
+        }
+    } catch (...) { std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; }
+    try {
+        if (trayThread.joinable()) {
+            trayThread.join();
+            std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
+        }
+    } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
+    /*}
     else {
     std::cout << "[INFO] User interface has been disabled." << std::endl;
         tts.Initialize();
@@ -271,5 +277,5 @@ int main() {
     }
     // cfg.Initialize();
     // ui.Initialize();
-    // ui.Render(&uiRunning);
+    // ui.Render(&uiRunning);*/
 }

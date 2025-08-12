@@ -929,6 +929,15 @@ void RemoveTexture(TextureData* tex_data) {
     ImGui_ImplVulkan_RemoveTexture(tex_data->DS);
 }
 
+/*#include "OpenFileManager.hpp"
+static inline void OpenInFM() {
+    char image_path[PATH_MAX];
+    snprintf(image_path, sizeof(image_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/background");
+    if (!util::open_in_file_manager(image_path, false)) {
+        std::cerr << "[ERROR] Failed to open file manager\n";
+    }
+}*/
+
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // configuration path
@@ -1045,11 +1054,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
     io.Fonts->Clear();
-    if (cfg.get<std::string>("ui_custom_font", ""), "" == "") {
+    if (cfg.get<std::string>("ui_custom_font", "") != "disable" || cfg.get<std::string>("ui_custom_font", "") != "false") {
         io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
     }
     else {
-        std::cout << "[INFO] Font parameter was not set to load custom font, using default!" << std::endl;
+        std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
         io.Fonts->AddFontDefault();
     }
     
@@ -1143,6 +1152,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     float g;
     float b;
     
+    char usr[PATH_MAX];
+    snprintf(usr, sizeof(usr), "%s", getenv("HOME"));
     static char manInput[128] = "";
     // validate range & convert to normalized floats
     //auto in_range = [](int v){ return (v >= 0 && v <= 255); }; defined above
@@ -1159,13 +1170,14 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     std::cout << "[INFO] Setting SDL2 background color as following:\n[INFO] Red: " << r*255 << "\n[INFO] Green: " << g*255 << "\n[INFO] Blue: " << b*255 << std::endl; 
     ImVec4 backgorund_color(r, g, b, 1.0f);
     // load user background image
-    TextureData* texture;
-    bool ret = LoadTextureFromFile(image_path, texture);
+    TextureData texture;
+    bool ret = LoadTextureFromFile(image_path, &texture);
     if (imgbg) {
         IM_ASSERT(ret);
     }
     SDL_Event event;
     while (runningFlag->load()) {
+        
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
@@ -1200,9 +1212,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Begin("Settings", &settings);
             if (imgbg) { 
                 ImGui::Text("Change background image:");
-                // ImGui::InputTextWithHint("Enter image path.", "Enter image path.", usr, IM_ARRAYSIZE(usr));
-                if (ImGui::Button("Close"))
-                    settings = false;
+
             } 
             else {
                 ImGui::Text("Change background color:");
@@ -1263,11 +1273,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 
                 
                 ImGui::Image(
-                    (ImTextureID)texture->DS, 
+                    (ImTextureID)texture.DS, 
                     ImVec2(fb_width, fb_height), 
                 
-                    ImVec2(ImClamp(((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f))), 0.0f, 1.0f), ImClamp(((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)), 
-                    ImVec2(ImClamp(1.0f - ((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->width > 0) ? (float)texture->width : 1.0f))), 0.0f, 1.0f), ImClamp(1.0f - ((std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture && texture->width > 0) ? (float)texture->width : 1.0f), fb_height/((texture && texture->height > 0) ? (float)texture->height : 1.0f))*((texture && texture->height > 0) ? (float)texture->height : 1.0f))), 0.0f, 1.0f)));
+                    ImVec2(ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)), 
+                    ImVec2(ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)));
                 
                 
                 

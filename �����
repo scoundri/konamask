@@ -1,0 +1,32 @@
+;─────────────────────────────────────────[ konamask configuration ]─────────────────────────────────────────;
+
+# Do not remove components/parameter names from this file, otherwise konamask will not be able to properly initialize.
+# Most commets will be removed if in-app settings are applied.
+
+# Audio / TTS parameters
+speech_rate   = 150             ; words per minute      (default: 100, min: 0, max: 65535 | type: unsigned short)
+speech_pitch  = 50              ;                       (default:  50, min: 0, max: 65535 | type: unsigned short)
+speech_volume = 100             ; output volume         (default: 100, min: 0, max: 65535 | type: unsigned short)
+silence_threshold = 200         ; amplitude threshold                        (default:  200 | type: int)
+silence_timeout = 1000          ; required silence duration (ms) to finalize (default: 1000 | type: int)
+
+# Input / STT parameters
+voskapi_model_path  = ./model   ; define path (folder location) to a vosk model (download from: https://alphacephei.com/vosk/models if website is down, use https://archive.nightvoid.com/Development/konamask/)
+speech_vociebank    = en-us     ; voicebank, that you want to use (default: en-us)
+
+# User interface parameters
+enable_user_interface = false    ; enables/disables UI                   (default: true | enable: true, disable: false | type: boolean)
+enable_statistics = false       ; enables/disables statistics (FPS/RT)  (default: true | enable: true, disable: false | type: boolean)
+
+ui_custom_font = ./Outfit-SemiBold.ttf ; custom font family directory (default: | type: const char*)
+ui_font_size = 14               ; custom font size (default: 16, min: 8, max: 72 | type: int) *required if using cusom font | max & min may differ with the font you're using, these are common values
+
+ui_bgc_red = 45                 ; chagnes the red factor of the background color   (default: 45, min: 0, max: 255 | type: float)
+ui_bgc_green = 20               ; chagnes the green factor of the background color (default: 20, min: 0, max: 255 | type: float)
+ui_bgc_blue = 60                ; chagnes the blue factor of the background color  (default: 60, min: 0, max: 255 | type: float)
+
+# Advanced parameters (do not edit, unless you know, what you're doing)
+pa_sample_spec_rate = 22050     ; pulseaudio sample rate                                    (default: 22050 | type: int)
+buffer_factor       = 0.05      ; portaudio buffer (smaller buffer -> smaller latency)      (default: 0.05  | type: double)
+
+;────────────────────────────────────────────────────────────────────────────────────────────────────────────;

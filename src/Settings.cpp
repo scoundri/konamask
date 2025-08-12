@@ -10,17 +10,43 @@ int Settings::Initialize() {
     std::cout << "\n>────────────────────────[LOADING CONFIGURATION]────────────────────────<\n" << std::endl;
 
     char path[PATH_MAX];
+    char backup[PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
+    snprintf(backup, sizeof(backup), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config_backup.ini");
 
     if (!LoadFromFile(path)) {
         std::cerr << "[ERROR] Failed to load config.ini, using defaults." << std::endl;
         std::cout << "\n>──────────────────[UNSUCCESSULLY LOADED CONFIGURATION]─────────────────<\n" << std::endl;
         return 1;
     }
-    std::cerr << "[INFO] Successfully loaded config.ini!" << std::endl;
+    std::cout << "[INFO] Successfully loaded config.ini! Backing up..." << std::endl;
+    std::cout << "[INFO] Successfully backed-up config.ini!" << std::endl;
 
     std::cout << "\n>───────────────────[SUCCESSULLY LOADED CONFIGURATION]──────────────────<\n" << std::endl;
     return 0;
+}
+
+
+bool Settings::CopyFile(const std::string& src, const std::string& dest) {
+    std::ifstream sourceFile(src, std::ios::binary);
+    if (!sourceFile.is_open()) {
+        std::cerr << "[ERROR] Could not open source file (" << dest << ")." << std::endl;
+        return false;
+    }
+
+    std::ofstream destinationFile(dest, std::ios::binary);
+    if (!destinationFile.is_open()) {
+        std::cerr << "[ERROR] Could not open destination file (" << dest << ")." << std::endl;
+        sourceFile.close();
+        return false;
+    }
+
+    destinationFile << sourceFile.rdbuf();
+
+    sourceFile.close();
+    destinationFile.close();
+
+    return true;
 }
 
 Settings& Settings::GetInstance() {

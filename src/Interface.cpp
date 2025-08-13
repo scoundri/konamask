@@ -1500,6 +1500,33 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (debug_log) {
             ImGui::ShowDebugLogWindow();
         }
+        {
+            
+            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
+            static float f = 0.0f;
+            ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
+            ImGui::SetNextWindowSize(ImGui::GetWindowSize());
+            ImGui::Text("konamask voice transforming utility");
+            ImGui::Checkbox("open settings", &settings);
+            ImGui::Checkbox("open manual voice output", &manual);
+            ImGui::Checkbox("open ImGui debug log", &debug_log);
+
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
+
+            if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
+            if (ImGui::Button("Minimize")) {
+                Minimize();
+            }            
+            if (ImGui::Button("Exit")) {
+                if (!Shutdown(surface)) {
+                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+                    std::exit(EXIT_FAILURE);
+                }
+            }
+            ImGui::End();
+
+        }
         if (imgbg) {
             // remove padding
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -1531,35 +1558,46 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             }
             ImGui::PopStyleVar();
         }
+              // remove padding
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
         {
+            ImGui::SetNextWindowPos(ImVec2((float)fb_width-30, -1), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(16,32), ImGuiCond_Always);
+        
+            ImGui::Begin("close", nullptr,
+                         ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoTitleBar |
+                         ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoBackground);
+            ImGui::GetForegroundDrawList();
             
-            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
-            static float f = 0.0f;
-            ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-            ImGui::SetNextWindowSize(ImGui::GetWindowSize());
-            ImGui::Text("konamask voice transforming utility");
-            ImGui::Checkbox("open settings", &settings);
-            ImGui::Checkbox("open manual voice output", &manual);
-            ImGui::Checkbox("open ImGui debug log", &debug_log);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-
-            if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
-            if (ImGui::Button("Minimize")) {
+            if (ImGui::Button("T")) {
                 Minimize();
-            }            
-            if (ImGui::Button("Exit")) {
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Minimize to tray");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("X")) {
                 if (!Shutdown(surface)) {
                     std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
                     std::exit(EXIT_FAILURE);
                 }
             }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Quit konamask");
+            }
+            
             ImGui::End();
-
         }
-
-
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        
         // rendering
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();

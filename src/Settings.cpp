@@ -4,7 +4,24 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
-#include <limits.h> // for path
+#include <sys/stat.h> // for CheckFile
+#include <filesystem> // for logpath file creation
+
+static bool CheckFile(const char* path) {
+    struct stat info;
+    if (stat(path, &info) != 0) {
+        std::cerr << "[ERROR] File check failed!" << "\n[INFO] Path \"" << path << "\" does not exist." << std::endl;
+        return false;
+    }
+
+    if (info.st_mode & S_IFREG) {
+        return true; // path exists & is a file
+    } else {
+        std::cerr << "[ERROR] Path \"" << path << "\" is not a file." << std::endl;
+        return false;
+    }
+}
+
 
 int Settings::Initialize() {    
     std::cout << "\n>────────────────────────[LOADING CONFIGURATION]────────────────────────<\n" << std::endl;
@@ -15,13 +32,63 @@ int Settings::Initialize() {
     snprintf(backup, sizeof(backup), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config_backup.ini");
 
     if (!LoadFromFile(path)) {
-        std::cerr << "[ERROR] Failed to load config.ini, using defaults." << std::endl;
-        std::cout << "\n>──────────────────[UNSUCCESSULLY LOADED CONFIGURATION]─────────────────<\n" << std::endl;
+        std::cerr << "[ERROR] Failed to load config.ini, trying to load backup..." << std::endl;
+        if (!LoadFromFile(backup)) {
+            std::cerr << "[ERROR] Failed to load config.ini, trying to load backup..." << std::endl;
+            std::cout << "\n>──────────────────[UNSUCCESSULLY LOADED CONFIGURATION]─────────────────<\n" << std::endl;
+        }
         return 1;
     }
     std::cout << "[INFO] Successfully loaded config.ini! Backing up..." << std::endl;
-    std::cout << "[INFO] Successfully backed-up config.ini!" << std::endl;
+    if (!CheckFile(backup)) {
+        if (Settings::CopyFile(path, backup)) {
+        std::cout << "[INFO] Successfully backed-up config.ini!" << std::endl;
+        }
+        else {
+            std::cout << "[ERROR] Unable to backup config.ini!" << std::endl;
+        }
+    }
 
+    if (get<bool>("enable_logpathging_to_file", false)) {
+        snprintf(logpath, sizeof(logpath), "%s/%s", getenv("HOME"), ".config/konacode/konamask/latest.log");
+
+        if (!CheckFile(logpath)) {
+            // build path and ensure parent directory exists
+            std::filesystem::path p(logpath);
+            std::error_code ec;
+            p = p.parent_path();
+            if (!p.empty() && !std::filesystem::exists(p, ec)) {
+                if (!std::filesystem::create_directories(p, ec)) {
+                    std::cerr << "[ERROR] Failed to create directory: '" << p.string()
+                              << "': " << ec.message() << '\n';
+                }
+            } else if (ec) {
+                std::cerr << "[ERROR] Unable to check parent directory!\n[ERROR] " << p.string()
+                          << "': " << ec.message() << '\n';
+            }
+#if defined(_WIN32)
+            std::wstring wpath = p.wstring();
+            HANDLE h = CreateFileW(
+                wpath.c_str(),
+                GENERIC_WRITE,
+                0,                // no sharing
+                nullptr,
+                CREATE_NEW,       // fail if already exists
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr
+            );
+            if (h == INVALID_HANDLE_VALUE) {
+                DWORD err = GetLastError();
+                if (err == ERROR_FILE_EXISTS || err == ERROR_ALREADY_EXISTS) {
+                } else {
+                    std::cerr << "[ERROR] CreateFileW failed: " << err << '\n';
+                }
+            } else {
+                CloseHandle(h);
+            }
+#endif
+        }
+    }
     std::cout << "\n>───────────────────[SUCCESSULLY LOADED CONFIGURATION]──────────────────<\n" << std::endl;
     return 0;
 }

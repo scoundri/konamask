@@ -1,6 +1,7 @@
 #include "SpeechToText.h"
 #include "TextToSpeech.h"
 #include "Interface.h"
+#include "Logger.h"
 #include "curl.h"
 #include <atomic>
 #include <cstdlib>
@@ -226,6 +227,10 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
+    std::cout << "Log path:" << cfg.logpath;
+    if (cfg.get<bool>("enable_logging_to_file", false))
+        Logger& flog = Logger::GetInstance();
+
     //tts.Initialize(); // debug/development
     //tts.Initialize();
     if (cfg.get<bool>("enable_user_interface", true)) {
@@ -233,7 +238,7 @@ int main() {
     ui.Render(&uiRunning);
     //if (cfg.get<int>("enable_user_interface", true)) {
     //std::cout << "[INFO] User interface has been enabled." << std::endl;
-        
+    //flog.log("test");
     std::thread uiThread([&](){
         try {
             ui.Initialize();

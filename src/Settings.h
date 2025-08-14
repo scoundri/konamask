@@ -1,6 +1,8 @@
 #pragma once
+#include <linux/limits.h>
 #include <string>
 #include <unordered_map>
+#include <limits.h> // for paths
 
 class Settings {
 public:
@@ -16,7 +18,7 @@ public:
     // templated setters for modifying at runtime
     template<typename T>
     void set(const std::string& key, const T& value);
-
+    char logpath[PATH_MAX];
 private:
     Settings() = default;
     ~Settings() = default;

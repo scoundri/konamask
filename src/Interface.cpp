@@ -1512,6 +1512,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Checkbox("open manual voice output", &manual);
             ImGui::Checkbox("open ImGui debug log", &debug_log);
             ImGui::Checkbox("enable performance statistics", &stats);
+            ImGui::Spacing();
             if (ImGui::Button("Minimize")) {
                 Minimize();
             }
@@ -1520,7 +1521,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                     std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
                     std::exit(EXIT_FAILURE);
                 }
-            }
+            } ImGui::Dummy(ImVec2(0.0f, 20.0f));
             if (ImGui::Button("Kill (not recommended)")) {
                 exit(EXIT_SUCCESS);
             }

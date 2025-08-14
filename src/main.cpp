@@ -228,6 +228,7 @@ int main() {
     cfg.Initialize();
     //tts.Initialize(); // debug/development
     //tts.Initialize();
+    if (cfg.get<bool>("enable_user_interface", true)) {
     ui.Initialize();
     ui.Render(&uiRunning);
     //if (cfg.get<int>("enable_user_interface", true)) {
@@ -264,16 +265,18 @@ int main() {
             std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
         }
     } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
-    /*}
+    }
     else {
     std::cout << "[INFO] User interface has been disabled." << std::endl;
         tts.Initialize();
-        stt.Initialize();
-        tts.Shutdown(); // fix konamask (virt input) not destroying
-        if (trayThread.joinable()) {
-            trayThread.join();
-            std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
-        }
+        stt.Initialize();    
+        tts.Shutdown();
+        try {
+            if (trayThread.joinable()) {
+                trayThread.join();
+                std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
+            }
+        } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
     }
     // cfg.Initialize();
     // ui.Initialize();

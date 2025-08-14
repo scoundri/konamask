@@ -1303,7 +1303,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     char bgsuccess = 'u'; // unset
     bool manual = false;
     bool debug_log = false;
-    bool stats = cfg.get<bool>("enable_statistics", false);
+    bool stats = false;
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
     bool imgbg = (CheckFile(image_path));
     float r;
@@ -1511,18 +1511,18 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Checkbox("open settings", &settings);
             ImGui::Checkbox("open manual voice output", &manual);
             ImGui::Checkbox("open ImGui debug log", &debug_log);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-
-            if (stats) { ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate); }
+            ImGui::Checkbox("enable performance statistics", &stats);
             if (ImGui::Button("Minimize")) {
                 Minimize();
-            }            
+            }
             if (ImGui::Button("Exit")) {
                 if (!Shutdown(surface)) {
                     std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
                     std::exit(EXIT_FAILURE);
                 }
+            }
+            if (ImGui::Button("Kill (not recommended)")) {
+                exit(EXIT_SUCCESS);
             }
             ImGui::End();
 
@@ -1558,7 +1558,30 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             }
             ImGui::PopStyleVar();
         }
-              // remove padding
+        if (stats) {
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
+            {
+                ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
+            
+                ImGui::Begin("statistics", nullptr,
+                             ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoTitleBar |
+                             ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoScrollbar |
+                             ImGuiWindowFlags_NoBackground);
+                ImGui::GetForegroundDrawList();
+                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+
+                ImGui::End();
+            }
+            ImGui::PopStyleVar();
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+        }
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));

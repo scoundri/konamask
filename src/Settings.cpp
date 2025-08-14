@@ -105,6 +105,10 @@ bool Settings::SaveToFile(const std::string& filename) const { // TODO: make com
     return true;
 }
 
+static void trim(std::string& s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){ return !std::isspace(ch); }));
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), s.end());
+}
 
 template<typename T>
 T Settings::get(const std::string& key, const T& defaultValue) const {
@@ -114,9 +118,24 @@ T Settings::get(const std::string& key, const T& defaultValue) const {
     std::istringstream iss(it->second);
     T value;
     if constexpr (std::is_same_v<T, bool>) {
-        std::string val = it->second;
-        std::transform(val.begin(), val.end(), val.begin(), ::tolower);
-        return (val == "1" || val == "true" || val == "yes");
+        // robust bool parsing
+        std::string tmp = it->second;
+        trim(tmp);
+        size_t pos = tmp.find(';');
+        if (pos == std::string::npos) pos = tmp.find('#');
+        if (pos != std::string::npos) tmp = tmp.substr(0, pos);
+        trim(tmp);
+        std::transform(tmp.begin(), tmp.end(), tmp.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+
+        if (tmp == "1" || tmp == "true" || tmp == "yes" || tmp == "on") return true;
+        if (tmp == "0" || tmp == "false" || tmp == "no" || tmp == "off") return false;
+        // fallback to numeric parse
+        try {
+            int n = std::stoi(tmp);
+            return n != 0;
+        } catch (...) {
+            return defaultValue;
+        }
     } else {
         if (!(iss >> value)) return defaultValue;
         return value;

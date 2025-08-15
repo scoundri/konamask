@@ -32,6 +32,7 @@
 #include <chrono>
 #include <algorithm>
 #include <string>
+#include "Logger.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -47,6 +48,8 @@
 #define APP_USE_VULKAN_DEBUG_REPORT
 static VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
 #endif
+
+Logger& flog = Logger::GetInstance(); // comment out if causing issues
 
 static VkAllocationCallbacks*   g_Allocator = nullptr;
 static VkInstance               g_Instance = VK_NULL_HANDLE;
@@ -216,6 +219,7 @@ static void check_vk_result(VkResult err) {
     if (err == VK_SUCCESS) 
         return;
     fprintf(stderr, "[ERROR] (Vulkan) VkResult = %d\n", err);
+    flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) VkResult failed!\n");
     if (err < 0)
         abort();
 }
@@ -232,6 +236,12 @@ static bool CheckFile(const char* path) {
     struct stat info;
     if (stat(path, &info) != 0) {
         std::cerr << "[ERROR] File check failed: " << strerror(errno) << "\n[INFO] Path \"" << path << "\" does not exist." << std::endl;
+        flog.log("[ERROR] File check failed: ");
+        flog.log(strerror(errno));
+        flog.log("[\n[INFO] Path \"");
+        flog.log(path);
+        flog.log("\" does not exist.\n");
+
         return false;
     }
 
@@ -239,6 +249,9 @@ static bool CheckFile(const char* path) {
         return true; // path exists & is a file
     } else {
         std::cerr << "[ERROR] Path \"" << path << "\" is not a file." << std::endl;
+        flog.log("[\n[ERROR] Path \"");
+        flog.log(path);
+        flog.log("\" is not a file.\n");
         return false;
     }
 }
@@ -246,13 +259,18 @@ static bool CheckFile(const char* path) {
 static bool CopyFile(const std::string& src, const std::string& dest) {
     std::ifstream sourceFile(src, std::ios::binary);
     if (!sourceFile.is_open()) {
-        std::cerr << "[ERROR] Could not open source file (" << dest << ")." << std::endl;
+        std::cerr << "[ERROR] Could not open source file (" << src << ")." << std::endl;
+        flog.log("[ERROR] Could not open source file (" );
+        flog.log(src);
+        flog.log(").\n");
         return false;
     }
 
     std::ofstream destinationFile(dest, std::ios::binary);
     if (!destinationFile.is_open()) {
-        std::cerr << "[ERROR] Could not open destination file (" << dest << ")." << std::endl;
+        flog.log("[ERROR] Could not open destination file (" );
+        flog.log(dest);
+        flog.log(").\n");
         sourceFile.close();
         return false;
     }
@@ -336,7 +354,8 @@ void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format,
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
-        throw std::invalid_argument("Unsupported layout transition!");
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) transitionImageLayout: Unsupported layout transition\n");
+        throw std::invalid_argument("[ERROR] Unsupported layout transition!");
     }
 
     vkCmdPipelineBarrier(
@@ -358,7 +377,8 @@ void createBuffer(VkDevice device, VkPhysicalDevice physDevice, VkDeviceSize siz
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create buffer!");
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) createBuffer: Failed to create buffer!\n");
+        throw std::runtime_error("[ERROR] Failed to create buffer!");
     }
 
     VkMemoryRequirements memRequirements;
@@ -369,7 +389,8 @@ void createBuffer(VkDevice device, VkPhysicalDevice physDevice, VkDeviceSize siz
     allocInfo.memoryTypeIndex = findMemoryType(physDevice, memRequirements.memoryTypeBits, properties);
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate buffer memory!");
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) vkGetBufferMemoryRequirements: Failed to allocate buffer memory!\n");
+        throw std::runtime_error("[ERROR] Failed to allocate buffer memory!");
     }
 
     vkBindBufferMemory(device, buffer, bufferMemory, 0);
@@ -382,8 +403,10 @@ static void CreateCommandPool() {
                               | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     poolInfo.queueFamilyIndex = g_QueueFamily;   // same family as your graphics queue
 
-    if (vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool) != VK_SUCCESS)
-        throw std::runtime_error("failed to create command pool!");
+    if (vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool) != VK_SUCCESS) {
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) CreateCommandPool: Failed to create command pool!\n");
+        throw std::runtime_error("[ERROR] Failed to create command pool!");
+    }
 }
 
 static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties, const char* extension) {
@@ -516,6 +539,7 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily, wd->Surface, &res);
     if (res != VK_TRUE) {
         fprintf(stderr, "[ERROR] (Vulkan) No WSI support on physical device 0\n");
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0\n");
         exit(-1);
     }
 
@@ -1085,9 +1109,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
     if (window == nullptr) {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
+        flog.log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n");
+        flog.log(SDL_GetError());
+        flog.log("\n");
         return -1;
     }
     std::cout << "[INFO] (Vulkan/SDL2) Window created successfully!" << std::endl;
+        flog.log("[INFO] (Vulkan/SDL2) Window created successfully!\n");
 
     ImVector<const char*> extensions;
     uint32_t extensions_count = 0;
@@ -1101,9 +1129,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     VkResult err;
     if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0) {
         printf("[ERROR] (Vulkan/SDL2) Failed to create Vulkan/SDL2 surface.\n");
+        flog.log("[ERROR] (Vulkan/SDL2) Failed to create Vulkan/SDL2 surface.\n");
         return 1;
     }
     std::cout << "[INFO] (Vulkan/SDL2) Successfully created Vulkan/SDL2 surface!" << std::endl;
+    flog.log("[INFO] (Vulkan/SDL2) Successfully created Vulkan/SDL2 surface!\n");
 
     // create framebuffers
     int w, h;
@@ -1129,7 +1159,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // validate range & convert to normalized floats
     auto in_range = [](int v){ return (v >= 0 && v <= 255); };
     if (!in_range(cfg.get<int>("ui_theme_red",   50)) || !in_range(cfg.get<int>("ui_theme_green", 20)) || !in_range(cfg.get<int>("ui_theme_blue",  60))) {
-        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults.\n";
+        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults." << std::endl;
+        flog.log("[ERROR] Color parse/validation failed, reverting to defaults.\n");
         tcr = static_cast<float>(50); tcg = static_cast<float>(20); tcb = static_cast<float>(60);
     } 
     else {
@@ -1138,8 +1169,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         tcg = static_cast<float>(cfg.get<int>("ui_theme_green", 42)) / 255.0f;
         tcb = static_cast<float>(cfg.get<int>("ui_theme_blue",  92)) / 255.0f;
     }
-    std::cout << "[INFO] Setting ImGui style theme color as following:\n[INFO] Red: " << tcr*255 << "  | (" << tcr << ")\n[INFO] Green: " << tcg*255 << "  | (" << tcg << ")\n[INFO] Blue: " << tcb*255 << "  | (" << tcb << ")" << std::endl; 
-    // setup scaling
+    std::cout << "[INFO] Setting ImGui style theme color as following:\n[INFO] Red: " << tcr*255 << "  | (" << tcr << ")\n[INFO] Green: " << tcg*255 << "  | (" << tcg << ")\n[INFO] Blue: " << tcb*255 << "  | (" << tcb << ")" << std::endl;
     ImVec4 theme_color(tcr, tcg, tcb, 1.0f); // only needed for the GUI
 
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1316,7 +1346,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // validate range & convert to normalized floats
     //auto in_range = [](int v){ return (v >= 0 && v <= 255); }; defined above
     if (!in_range(cfg.get<int>("ui_bgc_red",   50)) || !in_range(cfg.get<int>("ui_bgc_green", 20)) || !in_range(cfg.get<int>("ui_bgc_blue",  60))) {
-        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults.\n";
+        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults." << std::endl;
+        flog.log("[ERROR] Color parse/validation failed, reverting to defaults.\n");
         r = static_cast<float>(50); g = static_cast<float>(20); b = static_cast<float>(60);
     } 
     else {
@@ -1440,6 +1471,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::SeparatorText("");
                 if (ImGui::Button("Save")) {
                     std::cout << "[INFO] Saving settings..." << std::endl;
+                    flog.log("[INFO] Saving settings...");
                     ImVec4ToFloats({r,g,b,0});
                     if (!imgbg) {
                         try {
@@ -1447,39 +1479,73 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                             cfg.set<int>("ui_bgc_green", g*255);
                             cfg.set<int>("ui_bgc_blue", b*255);
                             std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                        } catch (...) {   std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; }
+                            flog.log("[INFO] Background color updated successfully!\n");
+                        } 
+                        catch (...) {   
+                            std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; 
+                            flog.log("[ERROR] Unable to update background color configuration! Skipping...\n");
+                        }
                         
-                    } else { std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; }
+                    } 
+                    else { 
+                        std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; 
+                        flog.log("[INFO] Skipping background color saving due to background image being active.\n"); 
+                    }
                     ImVec4ToFloats({tcr,tcg,tcb,0});
                     try {
                         cfg.set<int>("ui_theme_red", tcr*255); // TODO: fix values not updating
                         cfg.set<int>("ui_theme_green", tcg*255);
                         cfg.set<int>("ui_theme_blue", tcb*255);
                         std::cout << "[INFO] Theme color updated successfully!" << std::endl;
+                        flog.log("[INFO] Theme color updated successfully!\n");
                         
-                    } catch (...) {   std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; }
+                    } 
+                    catch (...) {   
+                        std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; 
+                        flog.log("[ERROR] Unable to update theme color configuration! Skipping...\n");
+                    }
                     try {
                         cfg.set<int>("speech_rate", sr);
                         cfg.set<int>("speech_pitch", sp);
                         cfg.set<int>("speech_volume", sv);
                         cfg.set<std::string>("speech_vociebank", voicebank);
                         std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
-                    } catch (...) {   std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; }
+                        flog.log("[INFO] Text-to-speech configuration updated successfully!\n");
+                    } 
+                    catch (...) {   
+                        std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; 
+                        flog.log("[ERROR] Unable to update text-to-speech configuration! Skipping...\n"); 
+                    }
                     try {
                         cfg.set<int>("silence_threshold", sthreshold);
                         cfg.set<int>("silence_timeout", stimeout);
                         cfg.set<std::string>("voskapi_model_path", voskapi);
                         std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
-                    } catch (...) {   std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; }
+                        flog.log("[INFO] Speech-to-text configuration updated successfully!\n");
+                    } 
+                    catch (...) {   
+                        std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; 
+                        flog.log("[ERROR] Unable to update speech-to-text configuration! Skipping...\n");
+                    }
                     try {
                         cfg.set<int>("pa_sample_spec_rate", pasamplerate);
                         cfg.set<int>("buffer_factor", bufferfactor);
                         std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
-                    } catch (...) {   std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; }
+                        flog.log("[INFO] Advanced settings updated successfully!\n");
+                    } 
+                    catch (...) {   
+                        std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; 
+                        flog.log("[ERROR] Unable to update advanced settings! Skipping...\n");
+                    }
                     
                     if (cfg.SaveToFile(config_path)) {
                         std::cout << "[INFO] Successfully applied all settings!" << std::endl;
-                    } else { std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - I the file in use of another proces?" << std::endl; }
+                        flog.log("[INFO] Successfully applied all settings!\n");
+                    } 
+                    else { 
+                        std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?" << std::endl; 
+                        flog.log("[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?\n");
+                    }
                 } ImGui::SameLine();
                 if (ImGui::Button("Close"))
                     settings = false;
@@ -1609,6 +1675,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             if (ImGui::Button("X")) {
                 if (!Shutdown(surface)) {
                     std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+                    flog.log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
                     std::exit(EXIT_FAILURE);
                 }
             }
@@ -1639,6 +1706,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // cleanup
     if (!Shutdown(surface)) {
         std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+        flog.log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
     }
 
     return 0;
@@ -1646,6 +1714,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
 int Interface::Initialize() {
     std::cout << "\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n" << std::endl;
+    flog.log("\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n");
     // setup SDL
 #ifdef _WIN32
     ::SetProcessDPIAware();
@@ -1653,9 +1722,13 @@ int Interface::Initialize() {
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
         printf("[ERROR] (Vulkan/SDL2) %s\n", SDL_GetError());
+        flog.log("[ERROR] (Vulkan/SDL2) SDL Initialization threw:\n[ERROR] ");
+        flog.log(SDL_GetError());
+        flog.log("\n");
         return -1;
     }
     std::cout << "[INFO] (Vulkan/SDL2) SDL dependencies loaded successfully!" << std::endl;
+    flog.log("[INFO] (Vulkan/SDL2) SDL dependencies loaded successfully!\n");
 
 // from 2.0.18: Enable native IME
 #ifdef SDL_HINT_IME_SHOW_UI
@@ -1664,6 +1737,7 @@ int Interface::Initialize() {
 
 
     std::cout << "\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n" << std::endl;
+    flog.log("\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n");
     return 0;
 }
 

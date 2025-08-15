@@ -49,7 +49,7 @@ int Settings::Initialize() {
         }
     }
 
-    if (get<bool>("enable_logpathging_to_file", false)) {
+    if (get<bool>("enable_logging_to_file", false)) {
         snprintf(logpath, sizeof(logpath), "%s/%s", getenv("HOME"), ".config/konacode/konamask/latest.log");
 
         if (!CheckFile(logpath)) {

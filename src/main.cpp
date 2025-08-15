@@ -227,61 +227,111 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
-    std::cout << "Log path:" << cfg.logpath;
-    if (cfg.get<bool>("enable_logging_to_file", false))
-        Logger& flog = Logger::GetInstance();
-
+    Logger& flog = Logger::GetInstance();
+    if (cfg.get<bool>("enable_logging_to_file", false)) {
+        std::cout << "[INFO] Logger has been enabled!" << std::endl;
+        flog.log("\n\n     occ.                            .klccc.                \n"
+    "    dcc                           o0xlccccd00O00KXNk.       \n"
+    "   ,cl'              .OXK00OOOOOkoccccccc'......;ccc::clxO, \n"
+    "   .ld.         .KOxocccccccccllccccccccc:...               \n"
+    "    'd,       0xlccccccccccccclccccccccc:....;kKx           \n"
+    "      k.   .0occcccccccccccccc:cccclccc;..',:ccccoO0                 __                                    __           \n"
+    "        l xocccccccccccccccccc:;:lcclc;;:cccccccccccoOc             / /______  ____  ____ __________  ____/ /__         \n"
+    "         xccccccccccccccccccccc:';lcclcccccccccccclcccckd          / //_/ __ \\/ __ \\/ __ `/ ___/ __ \\/ __  / _ \\    \n"
+    "        occcccccccccccccccclcc:c:.;lccdlcccccccccccllcccck,       / ,< / /_/ / / / / /_/ / /__/ /_/ / /_/ /  __/        \n"
+    "       ,cccccc;.,;;,,',:ccllccc:c:.cllc:;ccccllcccccl,  .clO     /_/|_|\\____/_/ /_/\\__,_/\\___/\\____/\\__,_/\\___/   \n"
+    "       lcccc;.......,:clccl':colcc,,c.:c...;cccooccccl:    '\n"
+    "       lcc:.....,;ccccclcc;..;cdocc,c,.,:....,:cd .cccl:                   Software developed by kona                   \n"
+    "       cc;.',;lccclccccocc....;lldc::c..::cox.l 'x  ,cco.          ┌─────────────────────────────────────────┐          \n"
+    "       ll:clcclccoccccccc:.....:;;occc'oO00dc.dl      cco              website: https://konacode.com/                   \n"
+    "      olclocclccolcccc,:c.......l.,occ,,kOxk..dd;      .l.             my projects: https://nightvoid.com/              \n"
+    "     k.,clccclcldcccc:.l;:ox0o..',.'oc;..::l .doo'                     github: https://github.com/kona-code/            \n"
+    "   '.  ,lccccocddcccc;o000Okk:......,l;..:;l..cdlo,         \n"
+    "       ,dcccoxldocccc.:oOxxkld ......:;.......'do:oc                   contact me here:                                 \n"
+    "       :lccdddodoccdd;... ,:,d,...............cddc:lk                  Discord: konacode                                \n"
+    "       llcddddxddcdddo,...coc;........,,..... lddd::.x                 Email: kona@nightvoid.com                        \n"
+    "      'lldddddxddlddddl,...........;,'...';:    ddo:o.             └─────────────────────────────────────────┘          \n"
+    "      olddddddddxloodddl;..............,c:c;     :dlcl      \n"
+    "     dccdddddddxoooolodl...:,,,''';,;ldlllc       .ocl      \n"
+    "    k:ccc:clodlllllllcl'..,ll:;,,,,,,odl:oo.       .cc      \n"
+    "  'd;::.......',;::::c;...doccllc;,,'.dl;o:,        :c      \n"
+    " ll,:odl::;,'.............:ldolloo:.  :cco,.        .'      \n"
+    "Oc:loddoddxc,';'....'.....ccclolclod:.:cdc'                 \n"
+    "llldxdoxo:,'..;''',;;'''':ddllooodllllldl;.                 \n"
+    "dodkxdko'''''':;;;;;;,,;xkkxo:clllodooxoc;x                 \n"
+    "ddxxdkO;,,,,,;cc:cc;;;;lOkOxl,;lllloollllllo                \n\n[INFO] Logger has been enabled!\n");
+    }
     //tts.Initialize(); // debug/development
     //tts.Initialize();
     if (cfg.get<bool>("enable_user_interface", true)) {
-    ui.Initialize();
-    ui.Render(&uiRunning);
-    //if (cfg.get<int>("enable_user_interface", true)) {
-    //std::cout << "[INFO] User interface has been enabled." << std::endl;
-    //flog.log("test");
-    std::thread uiThread([&](){
+        ui.Initialize();
+        ui.Render(&uiRunning);
+        //if (cfg.get<int>("enable_user_interface", true)) {
+        //std::cout << "[INFO] User interface has been enabled." << std::endl;
+        std::thread uiThread([&](){
+            try {
+                ui.Initialize();
+                ui.Render(&uiRunning);
+            }
+            catch (const std::exception& e) {
+                std::cerr << "[ERROR] UI exception occured: " << e.what() << "\n"
+                          << "[INFO] Falling back to console mode!" << std::endl;
+                flog.log("UI exception occured: ");
+                flog.log(e.what());
+                flog.log("\n[INFO] Falling back to console mode!\n");
+                uiRunning = false;
+            }
+            catch (...) {
+                std::cerr << "[ERROR] Unexpected UI exception! Falling back to console mode." << std::endl;
+                flog.log("[ERROR] A user interface exception occured!\n[INFO] Falling back to console mode!");
+                uiRunning = false;
+            }
+        });
+        ui.Render(&uiRunning);
+
+        stt.Initialize();  
+        tts.Shutdown(); // fix konamask (virt input) not destroying
         try {
-            ui.Initialize();
-            ui.Render(&uiRunning);
+            if (uiThread.joinable()) {
+                uiRunning = false;
+                uiThread.join();
+                std::cout << "[INFO] uiThread destroyed successfully!" << std::endl;
+                flog.log("[INFO] uiThread destroyed successfully!");
+            }
+        } 
+        catch (...) { 
+            std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; 
+            flog.log("[ERROR] Interface thread \"uiThread\" is unjoinable!"); 
         }
-        catch (const std::exception& e) {
-            std::cerr << "UI exception: " << e.what() << "\n"
-                      << "Falling back to console mode." << std::endl;
-            uiRunning = false;
-        }
-        catch (...) {
-            std::cerr << "Unexpected UI exception! Falling back to console mode." << std::endl;
-            uiRunning = false;
-        }
-    });
-    
-    stt.Initialize();  
-    tts.Shutdown(); // fix konamask (virt input) not destroying
-    try {
-        if (uiThread.joinable()) {
-            uiRunning = false;
-            uiThread.join();
-            std::cout << "[INFO] uiThread destroyed successfully!" << std::endl;
-        }
-    } catch (...) { std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; }
-    try {
-        if (trayThread.joinable()) {
-            trayThread.join();
-            std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
-        }
-    } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
-    }
-    else {
-    std::cout << "[INFO] User interface has been disabled." << std::endl;
-        tts.Initialize();
-        stt.Initialize();    
-        tts.Shutdown();
         try {
             if (trayThread.joinable()) {
                 trayThread.join();
                 std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
+                flog.log("[INFO] trayThread destroyed successfully!");
             }
-        } catch (...) { std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; }
+        } 
+        catch (...) { 
+            std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl;
+            flog.log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
+        }
+    }
+    else {
+        std::cout << "[INFO] User interface has been disabled." << std::endl;
+            flog.log("[INFO] User interface has been disabled."); 
+            tts.Initialize();
+            stt.Initialize();    
+            tts.Shutdown();
+            try {
+                if (trayThread.joinable()) {
+                    trayThread.join();
+                    std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
+                    flog.log("[INFO] trayThread destroyed successfully!");
+                }
+            } 
+            catch (...) { 
+                std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; 
+                flog.log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
+            }
     }
     // cfg.Initialize();
     // ui.Initialize();

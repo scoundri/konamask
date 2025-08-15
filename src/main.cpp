@@ -8,6 +8,7 @@
 #include <thread>
 #include <sys/stat.h> // for mkdir
 #include <limits.h>
+#include <fstream>
 #include "Tray.h"
 
 // object declaration
@@ -134,6 +135,13 @@ static struct tray tray = {
             {.text = NULL}},
 };
 
+static std::string now = [](){
+    std::time_t t = std::time(nullptr);
+    char b[20];
+    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+    return std::string(b);
+}();
+
 static bool first() {
     char path[PATH_MAX];
     char backup[PATH_MAX];
@@ -230,7 +238,10 @@ int main() {
     Logger::Initialize();
     if (cfg.get<bool>("enable_logging_to_file", false)) {
         std::cout << "[INFO] Logger has been enabled!" << std::endl;
-        Logger::GetInstance().log("\n\n     occ.                            .klccc.                \n"
+        Logger::GetInstance().log("\n\n\n\n\n\n\n\n>────────────────────────────────────────────────[KONAMASK STARTED @ ");
+            std::time_t t = std::time(nullptr); char b[20];
+        Logger::GetInstance().log(now);
+        Logger::GetInstance().log("]────────────────────────────────────────────────<\n\n     occ.                            .klccc.                \n"
     "    dcc                           o0xlccccd00O00KXNk.       \n"
     "   ,cl'              .OXK00OOOOOkoccccccc'......;ccc::clxO, \n"
     "   .ld.         .KOxocccccccccllccccccccc:...               \n"

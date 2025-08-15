@@ -74,7 +74,7 @@ private:
     Logger& operator=(const Logger&) = delete;
 
     void writeAppendShared(const std::string& path, const std::string& data) {
-#ifdef _WIN32
+#ifdef _WIN32 // some code for WIN32 inspired by a stackoverflow issue, but I don't have the URL for it
         HANDLE hFile = CreateFileA(
             path.c_str(),
             FILE_APPEND_DATA,
@@ -86,7 +86,7 @@ private:
         );
 
         if (hFile == INVALID_HANDLE_VALUE) {
-            std::cerr << "[ERROR] (Logger) CreateFile failed: " << GetLastError() << "\n";
+            std::cerr << "[ERROR] (Logger) CreateFile failed: " << GetLastError() << std::endl;
             return;
         }
 
@@ -103,7 +103,7 @@ private:
         // posix
         int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (fd == -1) {
-            std::cerr << "[ERROR] (Logger) Open failed: " << std::strerror(errno) << "\n";
+            std::cerr << "[ERROR] (Logger) Open failed: " << std::strerror(errno) << std::endl;
             return;
         }
 
@@ -113,7 +113,7 @@ private:
             ssize_t written = write(fd, buf, remaining);
             if (written == -1) {
                 if (errno == EINTR) continue;
-                std::cerr << "[ERROR] (Logger) Write failed: " << std::strerror(errno) << "\n";
+                std::cerr << "[ERROR] (Logger) Write failed: " << std::strerror(errno) << std::endl;
                 break;
             }
             remaining -= written;

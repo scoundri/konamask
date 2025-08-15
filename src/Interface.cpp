@@ -1713,7 +1713,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
 int Interface::Initialize() {
     std::cout << "\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n");
+    Logger::GetInstance().log("\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n\n");
     // setup SDL
 #ifdef _WIN32
     ::SetProcessDPIAware();
@@ -1736,7 +1736,7 @@ int Interface::Initialize() {
 
 
     std::cout << "\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n");
+    Logger::GetInstance().log("\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n\n");
     return 0;
 }
 

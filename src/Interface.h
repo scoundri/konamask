@@ -11,4 +11,5 @@ public:
 
 private:
     Settings& cfg = Settings::GetInstance();
+    std::string ReadFileToString(); // requires cfg object
 };

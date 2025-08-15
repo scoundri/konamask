@@ -272,10 +272,10 @@ int main() {
     "dodkxdko'''''':;;;;;;,,;xkkxo:clllodooxoc;x                 \n"
     "ddxxdkO;,,,,,;cc:cc;;;;lOkOxl,;lllloollllllo                \n\n[INFO] Logger has been enabled!\n");
     }
-    tts.Initialize();
+    //tts.Initialize();
     if (cfg.get<bool>("enable_user_interface", true)) {
-        //ui.Initialize();
-        //ui.Render(&uiRunning);
+        ui.Initialize();
+        ui.Render(&uiRunning);
         std::thread uiThread([&](){
             try {
                 ui.Initialize();

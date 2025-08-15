@@ -1096,6 +1096,16 @@ static int ResizeCallback(ImGuiInputTextCallbackData* data) { // for string usag
     return 0;
 }
 
+std::string Interface::ReadFileToString() {
+    std::ifstream file(cfg.logpath);
+    if (!file.is_open()) {
+        return "[Error] Could not log file";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // configuration path
     char config_path[PATH_MAX];
@@ -1331,8 +1341,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     bool budgetfm = false;    
     char bgsuccess = 'u'; // unset
     bool manual = false;
+    bool imgui_debug = false;
+    bool debug_log_enabled = cfg.get<bool>("enable_logging_to_file", false);
     bool debug_log = false;
     bool stats = false;
+    static std::string logFile = "";
+
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
     bool imgbg = (CheckFile(image_path));
     float r;
@@ -1562,8 +1576,18 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 manual = false;
             ImGui::End();
         }
-        if (debug_log) {
+        if (imgui_debug) {
             ImGui::ShowDebugLogWindow();
+        }
+        if (debug_log) {
+            ImGui::Begin("konamask log");
+
+            logFile = ReadFileToString();
+        
+            ImGui::Separator();
+            ImGui::TextWrapped("%s", logFile.c_str());
+        
+            ImGui::End();
         }
         {
             
@@ -1575,8 +1599,23 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::Text("konamask voice transforming utility");
             ImGui::Checkbox("open settings", &settings);
             ImGui::Checkbox("open manual voice output", &manual);
-            ImGui::Checkbox("open ImGui debug log", &debug_log);
             ImGui::Checkbox("enable performance statistics", &stats);
+            ImGui::Checkbox("open ImGui debug log", &imgui_debug);
+            if (debug_log_enabled) {
+                ImGui::Checkbox("open konamask log file", &debug_log);
+            } 
+            else { 
+                if (ImGui::Button("enable logging to file (requires restart)")) { 
+                    cfg.set<int>("enable_logging_to_file", true); 
+                    if (cfg.SaveToFile(config_path)) {
+                        std::cout << "[INFO] Successfully applied!" << std::endl;
+                        debug_log_enabled = true;
+                    } 
+                    else { 
+                        std::cout << "[ERROR] Unable to save setting: an unexpected exception occured! - Is the file in use of another proces?" << std::endl;
+                    }
+                } 
+            }
             ImGui::Spacing();
             if (ImGui::Button("Minimize")) {
                 Minimize();

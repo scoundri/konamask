@@ -1,4 +1,5 @@
 #include "SpeechToText.h"
+#include "Logger.h"
 #include <cstdint>
 #include <iostream>
 
@@ -12,16 +13,23 @@ int SpeechToText::Initialize() {
     model = vosk_model_new(cfg.get<std::string>("voskapi_model_path", "./model").c_str());
     if (!model) {
         std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.get<std::string>("voskapi_model_path", "./model") << "\"!" << std::endl;
+        Logger::GetInstance().log("[ERROR] Failed to load Vosk-API model from \"");
+        Logger::GetInstance().log(cfg.get<std::string>("voskapi_model_path", "./model"));
+        Logger::GetInstance().log("\"!\n");
         return 1;
     }
     std::cout << "[INFO] Successfully loaded the Vosk-API model from \"" << cfg.get<std::string>("voskapi_model_path", "./model") << "\"!" << std::endl;
-
+    Logger::GetInstance().log("[INFO] Successfully loaded the Vosk-API model from \"");
+    Logger::GetInstance().log(cfg.get<std::string>("voskapi_model_path", "./model"));
+    Logger::GetInstance().log("\"!\n");
     // initialize portaudio
     if (Pa_Initialize() != paNoError) {
         std::cout << "[ERROR] PortAudio Initialization error!" << std::endl;
+        Logger::GetInstance().log("[ERROR] PortAudio Initialization error!\n");
         std::exit(EXIT_FAILURE);
     }
     std::cout << "[INFO] Successfully initialized PortAudio!" << std::endl;
+    Logger::GetInstance().log("[INFO] Successfully initialized PortAudio!\n");
 
     PaDeviceIndex dev = Pa_GetDefaultInputDevice();
     const PaDeviceInfo *devInfo = Pa_GetDeviceInfo(dev);
@@ -30,7 +38,15 @@ int SpeechToText::Initialize() {
     // small buffer -> low latency
     framesPerBuffer =  int(sampleRate * cfg.get<double>("buffer_factor", 0.05));
     std::cout << "[INFO] Buffer factor has been set to  \"" << cfg.get<double>("buffer_factor", 0.05) << "\"." << std::endl;
+    Logger::GetInstance().log("[INFO] Buffer factor has been set to  \"");
+    Logger::GetInstance().log(cfg.get<std::string>("buffer_factor", "0.05"));
+    Logger::GetInstance().log("\".\n");
     std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
+    Logger::GetInstance().log("[INFO] Using input device: ");
+    Logger::GetInstance().log(devInfo->name);
+    Logger::GetInstance().log(" @");
+    Logger::GetInstance().log(std::to_string(sampleRate));
+    Logger::GetInstance().log("Hz\n");
 
     recognizer = vosk_recognizer_new(model, sampleRate);
     vosk_recognizer_set_max_alternatives(recognizer, 0);
@@ -46,19 +62,23 @@ int SpeechToText::Initialize() {
     if (Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate,
                       framesPerBuffer, paNoFlag, nullptr, nullptr) != paNoError) {
         std::cerr << "[INFO] Failed to open stream!" << std::endl;
+        Logger::GetInstance().log("[INFO] Failed to open stream!\n");
         return 1;
     }
     Pa_StartStream(stream);
     std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
+    Logger::GetInstance().log("[INFO] Successfully oppened the PortAudio stream!\n");
 
     std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
+    Logger::GetInstance().log("\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n\n");
     Run();
     return 0;
 }
 
 int SpeechToText::Run() {
 
-    std::cout << "[INFO] Listening...\n";
+    std::cout << "[INFO] Listening..." << std::endl;
+    Logger::GetInstance().log("[INFO] Listening...\n");
 
     std::vector<int16_t> buffer(framesPerBuffer);
     bool inSpeech = false;
@@ -94,10 +114,14 @@ int SpeechToText::Run() {
                 //const char* result = vosk_recognizer_final_result(recognizer);
                 //std::cout << result << std::endl;
                 
-                if (j_result["text"].get<std::string>().c_str() != "") { // when done with other stuff, test with j_result["text"].get<std::string>().compare("")
+                if (j_result["text"].get<std::string>().compare("")) { // when done with other stuff, test with j_result["text"].get<std::string>().compare("")
                     std::cout << "[INFO] Dispatching \"" << j_result["text"].get<std::string>() << "\"..." << std::endl;
                     TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
                     std::cout << "[INFO] Dispatched content successfully!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Dispatched \"");
+                    Logger::GetInstance().log(j_result["text"].get<std::string>());
+                    Logger::GetInstance().log("\" successfully!\n");
+
                 }
                 inSpeech = false;
                 silenceTimerRunning = false;

@@ -15,8 +15,6 @@ extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) 
 
 int TextToSpeech::Initialize() {
 Settings& cfg = Settings::GetInstance();
-Logger& flog = Logger::GetInstance();
-
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
 
     // ensure loopback are loaded
@@ -28,9 +26,9 @@ Logger& flog = Logger::GetInstance();
     ss.format   = PA_SAMPLE_S16LE;                                                // 16‑bit PCM
     ss.rate     = cfg.get<int>("pa_sample_spec_rate", 22050);   // must match espeak_Initialize
     std::cout << "[INFO] PulseAudio sample rate has been set to  \"" << cfg.get<int>("pa_sample_spec_rate", 22050) << "\"." << std::endl;
-    flog.log("[INFO] PulseAudio sample rate has been set to  \"");
-    flog.log(cfg.get<std::string>("pa_sample_spec_rate", "22050"));
-    flog.log("\".\n");
+    Logger::GetInstance().log("[INFO] PulseAudio sample rate has been set to  \"");
+    Logger::GetInstance().log(cfg.get<std::string>("pa_sample_spec_rate", "22050"));
+    Logger::GetInstance().log("\".\n");
     ss.channels = 1;
 
     int pa_error;

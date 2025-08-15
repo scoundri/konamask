@@ -94,7 +94,7 @@ int SpeechToText::Run() {
                 //const char* result = vosk_recognizer_final_result(recognizer);
                 //std::cout << result << std::endl;
                 
-                if (j_result["text"].get<std::string>().c_str() != "") {
+                if (j_result["text"].get<std::string>().c_str() != "") { // when done with other stuff, test with j_result["text"].get<std::string>().compare("")
                     std::cout << "[INFO] Dispatching \"" << j_result["text"].get<std::string>() << "\"..." << std::endl;
                     TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
                     std::cout << "[INFO] Dispatched content successfully!" << std::endl;

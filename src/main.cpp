@@ -227,10 +227,10 @@ int main() {
         tray_exit();
     });
     cfg.Initialize();
-    Logger& flog = Logger::GetInstance();
+    Logger::Initialize();
     if (cfg.get<bool>("enable_logging_to_file", false)) {
         std::cout << "[INFO] Logger has been enabled!" << std::endl;
-        flog.log("\n\n     occ.                            .klccc.                \n"
+        Logger::GetInstance().log("\n\n     occ.                            .klccc.                \n"
     "    dcc                           o0xlccccd00O00KXNk.       \n"
     "   ,cl'              .OXK00OOOOOkoccccccc'......;ccc::clxO, \n"
     "   .ld.         .KOxocccccccccllccccccccc:...               \n"
@@ -276,18 +276,17 @@ int main() {
             catch (const std::exception& e) {
                 std::cerr << "[ERROR] UI exception occured: " << e.what() << "\n"
                           << "[INFO] Falling back to console mode!" << std::endl;
-                flog.log("UI exception occured: ");
-                flog.log(e.what());
-                flog.log("\n[INFO] Falling back to console mode!\n");
+                Logger::GetInstance().log("UI exception occured: ");
+                Logger::GetInstance().log(e.what());
+                Logger::GetInstance().log("\n[INFO] Falling back to console mode!\n");
                 uiRunning = false;
             }
             catch (...) {
                 std::cerr << "[ERROR] Unexpected UI exception! Falling back to console mode." << std::endl;
-                flog.log("[ERROR] A user interface exception occured!\n[INFO] Falling back to console mode!");
+                Logger::GetInstance().log("[ERROR] A user interface exception occured!\n[INFO] Falling back to console mode!");
                 uiRunning = false;
             }
         });
-        ui.Render(&uiRunning);
 
         stt.Initialize();  
         tts.Shutdown(); // fix konamask (virt input) not destroying
@@ -296,28 +295,28 @@ int main() {
                 uiRunning = false;
                 uiThread.join();
                 std::cout << "[INFO] uiThread destroyed successfully!" << std::endl;
-                flog.log("[INFO] uiThread destroyed successfully!");
+                Logger::GetInstance().log("[INFO] uiThread destroyed successfully!");
             }
         } 
         catch (...) { 
             std::cout << "[ERROR] Interface thread \"uiThread\" is unjoinable!" << std::endl; 
-            flog.log("[ERROR] Interface thread \"uiThread\" is unjoinable!"); 
+            Logger::GetInstance().log("[ERROR] Interface thread \"uiThread\" is unjoinable!"); 
         }
         try {
             if (trayThread.joinable()) {
                 trayThread.join();
                 std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
-                flog.log("[INFO] trayThread destroyed successfully!");
+                Logger::GetInstance().log("[INFO] trayThread destroyed successfully!");
             }
         } 
         catch (...) { 
             std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl;
-            flog.log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
+            Logger::GetInstance().log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
         }
     }
     else {
         std::cout << "[INFO] User interface has been disabled." << std::endl;
-            flog.log("[INFO] User interface has been disabled."); 
+            Logger::GetInstance().log("[INFO] User interface has been disabled."); 
             tts.Initialize();
             stt.Initialize();    
             tts.Shutdown();
@@ -325,12 +324,12 @@ int main() {
                 if (trayThread.joinable()) {
                     trayThread.join();
                     std::cout << "[INFO] trayThread destroyed successfully!" << std::endl;
-                    flog.log("[INFO] trayThread destroyed successfully!");
+                    Logger::GetInstance().log("[INFO] trayThread destroyed successfully!");
                 }
             } 
             catch (...) { 
                 std::cout << "[ERROR] Tray thread \"trayThread\" is unjoinable!" << std::endl; 
-                flog.log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
+                Logger::GetInstance().log("[ERROR] Interface thread \"trayThread\" is unjoinable!"); 
             }
     }
     // cfg.Initialize();

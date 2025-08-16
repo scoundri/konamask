@@ -6,6 +6,7 @@
 int SpeechToText::Initialize() {
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
+    Logger::GetInstance().log("\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n\n");
     // initialize vosk api
     vosk_set_log_level(0);
 

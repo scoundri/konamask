@@ -189,7 +189,21 @@ static bool first() {
     if (Settings::CopyFile(path, backup)) {
         std::cout << "[INFO] Configuration successfully backed-up!" << std::endl;
     }
-    
+#ifdef _WIN32
+    std::cout << "[INFO] Windows platform detected! Downloading tray icon..." << std::endl;
+    if (Fetch::Download("https://cdn.nightvoid.com/software/konacode/konamask/tray.ico", path)) {
+        std::cout << "[INFO] Configuration downloaded successfully!" << std::endl;
+    }
+    else if (Fetch::Download("https://console.nightvoid.com/konacode/konamask/tray.ico", path)) {
+        std::cout << "[INFO] Configuration downloaded successfully from fallback server!" << std::endl;
+    } 
+    else {
+        std::cerr << "[INFO] Unable to download configuration file!\n[INFO] Download it from:"
+                     "[INFO] konamask github repository: https://github.com/kona-code/konamask\n"
+                     "[INFO] NightVoid archives: https://archive.nightvoid.com/Development/konamask/Backup%20configuration/ (URL might change in the future)" << std::endl;
+    }
+#endif
+
     return true;
 }
 

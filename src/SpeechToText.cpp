@@ -33,6 +33,12 @@ int SpeechToText::Initialize() {
     Logger::GetInstance().log("[INFO] Successfully initialized PortAudio!\n");
 
     PaDeviceIndex dev = Pa_GetDefaultInputDevice();
+    if (dev == paNoDevice) {
+        std::cerr << "[ERROR] No default input device found!" << std::endl;
+        Logger::GetInstance().log("[ERROR] No default input device found!\n");
+        Pa_Terminate();
+        return 1;
+    }
     const PaDeviceInfo *devInfo = Pa_GetDeviceInfo(dev);
     sampleRate = devInfo->defaultSampleRate;
 
@@ -45,9 +51,9 @@ int SpeechToText::Initialize() {
     std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
     Logger::GetInstance().log("[INFO] Using input device: ");
     Logger::GetInstance().log(devInfo->name);
-    Logger::GetInstance().log(" @");
+    Logger::GetInstance().log(" @ ");
     Logger::GetInstance().log(std::to_string(sampleRate));
-    Logger::GetInstance().log("Hz\n");
+    Logger::GetInstance().log(" Hz\n");
 
     recognizer = vosk_recognizer_new(model, sampleRate);
     vosk_recognizer_set_max_alternatives(recognizer, 0);

@@ -9,6 +9,14 @@
 #include <nlohmann/json.hpp>
 #include "TextToSpeech.h"
 
+#ifdef _WIN32
+// avoid windows min/max collisions with <algorithm>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 class SpeechToText {
 public:
     int Initialize();

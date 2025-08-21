@@ -1,0 +1,13 @@
+# konamask.pc - pkg-config Windows
+prefix=C:/ProgramFiles/konacode/konamask
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${exec_prefix}/include
+
+Name: konamask
+Description: konamask voice masking utility
+Version: 0.1.0
+
+Requires: espeak-ng, portaudio-2.0, sdl2
+Libs: -L${libdir} -lkonamask -lespeak-ng -lportaudio -lsdl2 -lvosk -limgui -lvulkan -lcurl -luser32 -lwinmm
+Cflags: -I${includedir} -I${includedir}/konamask -I${includedir}/third_party

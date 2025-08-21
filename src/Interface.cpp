@@ -1348,7 +1348,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     static std::string logFile = "";
 
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
-    bool imgbg = (CheckFile(image_path));
+    bool imgbg = (CheckFile(image_path) && cfg.get<bool>("enable_custom_background", false));
     float r;
     float g;
     float b;

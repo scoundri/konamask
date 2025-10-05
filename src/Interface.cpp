@@ -296,6 +296,7 @@ uint32_t findMemoryType(VkPhysicalDevice physDevice, uint32_t typeFilter, VkMemo
 
 VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool commandPool) {
     VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO; // keep (new api)
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = commandPool;
     allocInfo.commandBufferCount = 1;
@@ -304,6 +305,7 @@ VkCommandBuffer beginSingleTimeCommands(VkDevice device, VkCommandPool commandPo
     vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO; // keep (new api)
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
@@ -314,6 +316,7 @@ void endSingleTimeCommands(VkDevice device, VkCommandPool commandPool, VkQueue q
     vkEndCommandBuffer(commandBuffer);
 
     VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
@@ -557,7 +560,7 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     //printf("[INFO] (Vulkan) Selected PresentMode = %d\n", wd->PresentMode);
 
     IM_ASSERT(g_MinImageCount >= 2);
-    ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
+    ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 }
 
 static void VkCleanup() {
@@ -1244,18 +1247,25 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     init_info.Queue = g_Queue;
     init_info.PipelineCache = g_PipelineCache;
     init_info.DescriptorPool = g_DescriptorPool;
-    init_info.RenderPass = wd->RenderPass;
-    init_info.Subpass = 0;
     init_info.MinImageCount = g_MinImageCount;
     init_info.ImageCount = wd->ImageCount;
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.Allocator = g_Allocator;
+#ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING // new api change
+    init_info.UseDynamicRendering = true;
+    VkFormat color_fmt = VK_FORMAT_B8G8R8A8_UNORM;
+    VkFormat color_attachment_formats[1] = { color_fmt };
+#else
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.RenderPass = wd->RenderPass;
+    init_info.Subpass = 0;
+#endif
     init_info.CheckVkResultFn = check_vk_result;
+
+
     ImGui_ImplVulkan_Init(&init_info);
 
-    // ─────────────── manual font‐upload ───────────────
+    // manual font upload
     {
-        // manual font upload
         ImGuiIO& io = ImGui::GetIO();
         unsigned char* pixels; int w, h;
         io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
@@ -1304,12 +1314,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         VkDescriptorSet desc = ImGui_ImplVulkan_AddTexture(
             fontSampler, fontView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         );
-        
-        io.Fonts->SetTexID((ImTextureID)desc);
-        io.Fonts->ClearTexData();
+        // io.Fonts->SetTexID((ImTextureID)desc);
+        // io.Fonts->ClearTexData();
+        io.Fonts->Clear(); // new api
 
     }
-    // ───────────────────────────────────────────────────
 
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
     // configuration variables (currently no way of avoiding)
@@ -1346,6 +1355,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     bool debug_log = false;
     bool stats = false;
     static std::string logFile = "";
+    ImGuiListClipper clipperC;
+    float contacts_col_w = 280.0f, right_info_w = 300.0f;
+    float contact_row_h = 36.0f, avatar_size = 32.0f;
+    float name_offset_x = 6.0f, name_offset_y = 4.0f;
 
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
     bool imgbg = (CheckFile(image_path) && cfg.get<bool>("enable_custom_background", false));
@@ -1403,7 +1416,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         SDL_GetWindowSize(window, &fb_width, &fb_height);
         if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height)) {
             ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
-            ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
+            ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
             g_MainWindowData.FrameIndex = 0;
             g_SwapChainRebuild = false;
         }
@@ -1412,6 +1425,359 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
+
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->Pos);
+        ImGui::SetNextWindowSize(viewport->Size);
+        //ImGui::SetNextWindowViewport(viewport->ID);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::Begin("##DockRoot", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+        ImGui::PopStyleVar();
+
+
+        // top nav
+        ImGui::BeginChild("TopNav", ImVec2(0,46), false, ImGuiWindowFlags_NoScrollbar);
+        
+        ImGui::SetCursorPosX(20.0f);
+        ImGui::SetCursorPosY(15.0f);
+        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "koncloak");
+
+        // account button at right
+        ImGui::SetCursorPosX(fb_width - 310.0f);
+        ImGui::SetCursorPosY(10.0f);
+        if (ImGui::Button("Settings##top", ImVec2(100.0f, 28.0f))) settings = !settings;
+        ImGui::SetCursorPosX(fb_width - 200.0f);
+        ImGui::SetCursorPosY(10.0f);
+        ImGui::Button("Account##top", ImVec2(100.0f, 28.0f));
+        ImGui::SetCursorPosX(fb_width - 92.0f);
+        ImGui::SetCursorPosY(10.0f);
+        if (ImGui::Button("T", ImVec2(28.0f, 28.0f))) Minimize();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Minimize to tray");
+        ImGui::SetCursorPosX(fb_width - 60.0f);
+        ImGui::SetCursorPosY(10.0f);
+        if (ImGui::Button("X", ImVec2(28.0f, 28.0f))) {
+        if (!Shutdown(surface)) {
+                std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+                Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
+                std::exit(EXIT_FAILURE);
+            }
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Quit koncloak");
+        
+        // search
+        ImGui::SetCursorPosX(fb_width - (518.0f));
+        ImGui::SetCursorPosY(8.5f);
+        ImGui::PushItemWidth(200.0f);
+        ImGui::PopItemWidth();
+        ImGui::EndChild();
+
+
+        // contacts column
+        ImGui::BeginChild("ContactsCol", ImVec2(contacts_col_w, 0), true);
+        
+        ImGui::BeginGroup();
+        ImGui::SetCursorPosY(20.0f);
+        ImGui::TextUnformatted("Direct Messages");
+        ImGui::CalcTextSize("Direct Messages");
+
+        // plus button
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 44.0f);
+        ImGui::SetCursorPosY(12.0f);
+        if (ImGui::Button("+", ImVec2(32, 32))) {
+            // TODO: add friend function + popup -> file manager from konamask
+        }
+        ImGui::EndGroup();
+        ImGui::Separator();
+
+
+        // bottom (status / quick controls)
+        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 54);
+        ImGui::Separator();
+
+
+        ImGui::SetCursorPosX(68.0f);
+        ImGui::TextDisabled("Account:");
+        ImGui::SameLine();
+        ImGui::TextUnformatted("");
+
+        ImGui::SetCursorPosX(68.0f);
+        ImGui::TextDisabled("Status:");
+        ImGui::SameLine();
+        ImGui::TextUnformatted("");
+
+        ImGui::EndChild(); // ContactsCol
+        ImGui::SameLine();
+
+
+        // center (DM) area
+        ImGui::BeginChild("DMCenter", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar);
+
+        // header (contact name centered left, actions right)
+        ImGui::BeginChild("DMHeader", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::SetCursorPosX(20.0f);
+        ImGui::SetCursorPosY(20.0f);
+        ImGui::SameLine();
+        // ImGui::SetCursorPosY(12.0f);
+        // ImGui::TextDisabled(" - online"); add when status fetching is added
+
+        // right aligned actions
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 220);
+        ImGui::SetCursorPosY(13.5f);
+        if (ImGui::Button("Call", ImVec2(100,28))) {}
+        ImGui::SameLine();
+        ImGui::SetCursorPosY(13.5f);
+        if (ImGui::Button("Info", ImVec2(100,28))) {}
+        ImGui::EndChild();
+
+        // messages viewport
+        ImGui::BeginChild("DMMessages", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), true);
+
+        ImDrawList* dl_main = ImGui::GetWindowDrawList();
+        ImGuiStyle& style = ImGui::GetStyle();
+
+        float content_width = ImGui::GetContentRegionAvail().x;
+        float max_bubble_w = std::max(64.0f, content_width * 0.75f);
+
+        ImGui::EndChild();
+
+
+        ImGui::SameLine();
+
+
+        // right info panel
+        ImGui::BeginChild("DMInfo", ImVec2(right_info_w, 0), true);
+        ImGui::TextDisabled("Conversation");
+        ImGui::Separator();
+        ImGui::TextUnformatted("Pinned messages");
+        ImGui::Dummy(ImVec2(0,8));
+        ImGui::TextUnformatted("Shared media");
+        ImGui::Dummy(ImVec2(0,8));
+        ImGui::TextDisabled("Settings");
+        ImGui::EndChild();
+        ImGui::EndChild();
+
+        ImGui::End();
+
+        if (settings) {
+            ImGui::Begin("Settings", &settings);
+            ImGui::SeparatorText("dashboard customization");
+
+            if (imgbg) { 
+                ImGui::Text("Change background imAage:");
+                if (budgetfm) {
+                    ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+                    ImGui::Button("Select new background");
+                    ImGui::PopItemFlag();
+                    ImGui::PopStyleVar();
+                    if (picker.Draw("pick an image", &budgetfm, &out_path)) {
+                        printf("[INFO] Selected new background: %s\n[INFO] Replacing the current image...\n", out_path.c_str());
+                            if (CopyFile(out_path,image_path)) {
+                                RemoveTexture(&texture);
+                                ret = LoadTextureFromFile(image_path, &texture);
+                                IM_ASSERT(ret);
+                                std::cout << "[INFO] Applied new image successfully!" << std::endl;
+                                bgsuccess = 's'; // set
+                            } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = 'f'; } // fail
+                        budgetfm = false;
+                    }
+                }
+                else {
+                    if (ImGui::Button("Select new background"))
+                        budgetfm = true;
+                    if (bgsuccess == 's') {
+                        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(18,192,18,255));
+                        ImGui::Text("Successfully updated the background!");
+                        ImGui::PopStyleColor();
+                    } else if (bgsuccess == 'f') {
+                        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(242,37,85,255));
+                        ImGui::Text("Failed to update the background!");
+                        ImGui::PopStyleColor();                        
+                    }
+                }
+
+
+              } 
+            else {
+                ImGui::Text("Change background color:");
+                ImGui::ColorEdit3("", (float*)&backgorund_color);
+            }
+            ImGui::Spacing();
+            ImGui::Text("Change theme color:");
+            ImGui::ColorEdit3("", (float*)&theme_color); ImGui::Spacing();
+            ImGui::Text("Add custom fonts:");
+            ImGui::InputText("Font (.ttf) path", const_cast<char*>(fontdir.c_str()), fontdir.capacity()+1, flags, ResizeCallback, (void*)&fontdir); ImGui::Spacing();
+            ImGui::InputInt("Font size", (int*)&fontsize);
+            ImGui::SeparatorText("text-to-speech");
+            ImGui::Text("Voicebank");
+            ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank); ImGui::Spacing();
+            ImGui::Text("Voice variables");
+            ImGui::InputInt("Speech rate", (int*)&sr);
+            ImGui::InputInt("Speech pitch", (int*)&sp);
+            ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
+            ImGui::SeparatorText("speech-to-text");
+            ImGui::Text("Vosk-API model");
+            ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi); ImGui::Spacing();
+            ImGui::Text("Detection values");
+            ImGui::InputInt("Silence threshold", (int*)&sthreshold);
+            ImGui::InputInt("Silence timeout", (int*)&stimeout);
+            ImGui::SeparatorText("advanced parameters");
+            ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
+            ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
+            ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
+            ImGui::SeparatorText("");
+            if (ImGui::Button("Save")) {
+                std::cout << "[INFO] Saving settings..." << std::endl;
+                Logger::GetInstance().log("[INFO] Saving settings...");
+                ImVec4ToFloats({r,g,b,0});
+                if (!imgbg) {
+                    try {
+                        cfg.set<int>("ui_bgc_red", r*255);
+                        cfg.set<int>("ui_bgc_green", g*255);
+                        cfg.set<int>("ui_bgc_blue", b*255);
+                        std::cout << "[INFO] Background color updated successfully!" << std::endl;
+                        Logger::GetInstance().log("[INFO] Background color updated successfully!\n");
+                    } 
+                    catch (...) {   
+                        std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; 
+                        Logger::GetInstance().log("[ERROR] Unable to update background color configuration! Skipping...\n");
+                    }
+
+                } 
+                else { 
+                    std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; 
+                    Logger::GetInstance().log("[INFO] Skipping background color saving due to background image being active.\n"); 
+                }
+                ImVec4ToFloats({tcr,tcg,tcb,0});
+                try {
+                    cfg.set<int>("ui_theme_red", tcr*255); // TODO: fix values not updating
+                    cfg.set<int>("ui_theme_green", tcg*255);
+                    cfg.set<int>("ui_theme_blue", tcb*255);
+                    std::cout << "[INFO] Theme color updated successfully!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Theme color updated successfully!\n");
+
+                } 
+                catch (...) {   
+                    std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; 
+                    Logger::GetInstance().log("[ERROR] Unable to update theme color configuration! Skipping...\n");
+                }
+                try {
+                    cfg.set<int>("speech_rate", sr);
+                    cfg.set<int>("speech_pitch", sp);
+                    cfg.set<int>("speech_volume", sv);
+                    cfg.set<std::string>("speech_vociebank", voicebank);
+                    std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Text-to-speech configuration updated successfully!\n");
+                } 
+                catch (...) {   
+                    std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; 
+                    Logger::GetInstance().log("[ERROR] Unable to update text-to-speech configuration! Skipping...\n"); 
+                }
+                try {
+                    cfg.set<int>("silence_threshold", sthreshold);
+                    cfg.set<int>("silence_timeout", stimeout);
+                    cfg.set<std::string>("voskapi_model_path", voskapi);
+                    std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Speech-to-text configuration updated successfully!\n");
+                } 
+                catch (...) {   
+                    std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; 
+                    Logger::GetInstance().log("[ERROR] Unable to update speech-to-text configuration! Skipping...\n");
+                }
+                try {
+                    cfg.set<int>("pa_sample_spec_rate", pasamplerate);
+                    cfg.set<int>("buffer_factor", bufferfactor);
+                    std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Advanced settings updated successfully!\n");
+                } 
+                catch (...) {   
+                    std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; 
+                    Logger::GetInstance().log("[ERROR] Unable to update advanced settings! Skipping...\n");
+                }
+
+                if (cfg.SaveToFile(config_path)) {
+                    std::cout << "[INFO] Successfully applied all settings!" << std::endl;
+                    Logger::GetInstance().log("[INFO] Successfully applied all settings!\n");
+                } 
+                else { 
+                    std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?" << std::endl; 
+                    Logger::GetInstance().log("[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?\n");
+                }
+            } ImGui::SameLine();
+            if (ImGui::Button("Close"))
+                settings = false;
+            ImGui::End();
+    }
+    if (imgui_debug) {
+        ImGui::ShowDebugLogWindow();
+    }
+    if (debug_log) {
+        ImGui::Begin("koncloak log");
+
+         logFile = ReadFileToString();
+
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", logFile.c_str());
+
+        ImGui::End();
+    }
+    if (imgbg) {
+        // remove padding
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        {
+            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
+        
+            ImGui::Begin("background", nullptr,
+                         ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoTitleBar |
+                         ImGuiWindowFlags_NoBringToFrontOnFocus |
+                         ImGuiWindowFlags_NoInputs |
+                         ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoBackground);
+            
+            
+            ImGui::Image(
+                (ImTextureID)texture.DS, 
+                ImVec2(fb_width, fb_height), 
+            
+                ImVec2(ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)), 
+                ImVec2(ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)));
+            
+            
+            
+            ImGui::End();
+        }
+        ImGui::PopStyleVar();
+    }
+    if (stats) {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
+        {
+            ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
+        
+            ImGui::Begin("statistics", nullptr,
+                         ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoTitleBar |
+                         ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoBackground);
+            ImGui::GetForegroundDrawList();
+            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+            ImGui::End();
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+    }
+
 
 
             if (settings) {

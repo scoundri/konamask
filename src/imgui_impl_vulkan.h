@@ -27,80 +27,7 @@
 
 #pragma once
 #ifndef IMGUI_DISABLE
-#include <imgui.h>      // IMGUI_IMPL_API
-#include <imgui_internal.h>
-#define ImTextureID_Invalid ((ImTextureID)nullptr)
-
-//-----------------------------------------------------------------------------
-// specs and pixel storage for a texture used by ImGui
-//-----------------------------------------------------------------------------
-
-// texture formats supported on the CPU side:
-enum ImTextureFormat
-{
-    ImTextureFormat_RGBA32,   // 4 components per pixel (8-bit each)
-    ImTextureFormat_Alpha8    // 1 component per pixel (8-bit)
-};
-
-// status flags used to communicate with the renderer back-end:
-enum ImTextureStatus
-{
-    ImTextureStatus_OK,
-    ImTextureStatus_Destroyed,   // backend destroyed the texture
-    ImTextureStatus_WantCreate,  // request: create GPU texture
-    ImTextureStatus_WantUpdates, // request: update pixel regions
-    ImTextureStatus_WantDestroy  // request: destroy GPU texture
-};
-
-// rectangle descriptor for updates:
-struct ImTextureRect
-{
-    unsigned short x, y; // upper-left corner
-    unsigned short w, h; // width and height
-};
-
-//-----------------------------------------------------------------------------
-// core structure
-//-----------------------------------------------------------------------------
-struct ImTextureData
-{
-    // Core / backend usage
-    int               UniqueID;            // Sequential index (for debugging)
-    ImTextureStatus   Status;              // Current status (use SetStatus())
-    void*             BackendUserData;     // Opaque pointer for backend bookkeeping
-    ImTextureID       TexID;               // Low-level GPU texture handle (use SetTexID())
-    ImTextureFormat   Format;              // RGBA32 or Alpha8
-    int               Width, Height;       // Texture dimensions
-    int               BytesPerPixel;       // 4 or 1
-    unsigned char*    Pixels;              // CPU-side pixel buffer
-    ImTextureRect     UsedRect;            // Bounding box of all past+queued updates
-    ImTextureRect     UpdateRect;          // Bounding box of queued updates
-    ImVector<ImTextureRect> Updates;       // List of individual update rectangles
-    int               UnusedFrames;        // Frames since last use (for destruction logic)
-    unsigned short    RefCount;            // How many contexts are using this texture
-    bool              UseColors;           // True if RGB data used (vs. white+alpha only)
-    bool              WantDestroyNextFrame;// Internal flag to queue destruction
-
-    // constructors / destructors
-    //ImTextureData() { memset(this, 0, sizeof(*this)); TexID = ImTextureID; }
-    //~ImTextureData() { DestroyPixels(); }
-
-    // pixel buffer management
-    IMGUI_API void    Create(ImTextureFormat format, int w, int h);
-    IMGUI_API void    DestroyPixels();
-    void*             GetPixels()               { IM_ASSERT(Pixels); return Pixels; }
-    void*             GetPixelsAt(int x,int y)  { return Pixels + (x + y*Width)*BytesPerPixel; }
-    int               GetSizeInBytes() const    { return Width*Height*BytesPerPixel; }
-    int               GetPitch() const          { return Width*BytesPerPixel; }
-
-    // texture reference helpers
-    //ImTextureRef      GetTexRef()               { ImTextureRef tr; tr._TexData=this; return tr; }
-    ImTextureID       GetTexID() const          { return TexID; }
-
-    // called by renderer back-end
-    void              SetTexID(ImTextureID id)  { TexID = id; }
-    void              SetStatus(ImTextureStatus s) { Status = s; }
-};
+#include "imgui.h"      // IMGUI_IMPL_API
 
 // [Configuration] in order to use a custom Vulkan function loader:
 // (1) You'll need to disable default Vulkan function prototypes.
@@ -155,29 +82,27 @@ struct ImGui_ImplVulkan_InitInfo
     uint32_t                        QueueFamily;
     VkQueue                         Queue;
     VkDescriptorPool                DescriptorPool;             // See requirements in note above; ignored if using DescriptorPoolSize > 0
-    VkRenderPass                    RenderPass;                 // Ignored if using dynamic rendering
+    uint32_t                        DescriptorPoolSize;         // Optional: set to create internal descriptor pool automatically instead of using DescriptorPool.
     uint32_t                        MinImageCount;              // >= 2
     uint32_t                        ImageCount;                 // >= MinImageCount
+    VkPipelineCache                 PipelineCache;              // Optional
+
+    // Pipeline
+    VkRenderPass                    RenderPass;                 // Ignored if using dynamic rendering
+    uint32_t                        Subpass;
     VkSampleCountFlagBits           MSAASamples;                // 0 defaults to VK_SAMPLE_COUNT_1_BIT
 
-    // (Optional)
-    VkPipelineCache                 PipelineCache;
-    uint32_t                        Subpass;
-
-    // (Optional) Set to create internal descriptor pool instead of using DescriptorPool
-    uint32_t                        DescriptorPoolSize;
-
     // (Optional) Dynamic Rendering
-    // Need to explicitly enable VK_KHR_dynamic_rendering extension to use this, even for Vulkan 1.3.
+    // Need to explicitly enable VK_KHR_dynamic_rendering extension to use this, even for Vulkan 1.3 + setup PipelineRenderingCreateInfo.
     bool                            UseDynamicRendering;
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-    VkPipelineRenderingCreateInfoKHR PipelineRenderingCreateInfo;
+    VkPipelineRenderingCreateInfoKHR PipelineRenderingCreateInfo;   // Optional, valid if .sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR
 #endif
 
     // (Optional) Allocation, Debugging
     const VkAllocationCallbacks*    Allocator;
     void                            (*CheckVkResultFn)(VkResult err);
-    VkDeviceSize                    MinAllocationSize;          // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
+    VkDeviceSize                    MinAllocationSize;              // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
 };
 
 // Follow "Getting Started" link and check examples/ folder to learn about using backends!
@@ -186,6 +111,20 @@ IMGUI_IMPL_API void             ImGui_ImplVulkan_Shutdown();
 IMGUI_IMPL_API void             ImGui_ImplVulkan_NewFrame();
 IMGUI_IMPL_API void             ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer command_buffer, VkPipeline pipeline = VK_NULL_HANDLE);
 IMGUI_IMPL_API void             ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count); // To override MinImageCount after initialization (e.g. if swap chain is recreated)
+
+// (Advanced) Use e.g. if you need to recreate pipeline without reinitializing the backend (see #8110, #8111)
+// The main window pipeline will be created by ImGui_ImplVulkan_Init() if possible (== RenderPass xor (UseDynamicRendering && PipelineRenderingCreateInfo->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR))
+// Else, the pipeline can be created, or re-created, using ImGui_ImplVulkan_CreateMainPipeline() before rendering.
+struct ImGui_ImplVulkan_MainPipelineCreateInfo
+{
+    VkRenderPass                RenderPass = VK_NULL_HANDLE;
+    uint32_t                    Subpass = 0;
+    VkSampleCountFlagBits       MSAASamples = {};
+#ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
+    VkPipelineRenderingCreateInfoKHR PipelineRenderingCreateInfo;   // Optional, valid if .sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR
+#endif
+};
+IMGUI_IMPL_API void             ImGui_ImplVulkan_CreateMainPipeline(const ImGui_ImplVulkan_MainPipelineCreateInfo& info); // (render_pass xor (p_dynamic_rendering && p_dynamic_rendering is correct (sType and pNext)))
 
 // (Advanced) Use e.g. if you need to precisely control the timing of texture updates (e.g. for staged rendering), by setting ImDrawData::Textures = NULL to handle this manually.
 IMGUI_IMPL_API void             ImGui_ImplVulkan_UpdateTexture(ImTextureData* tex);
@@ -224,12 +163,12 @@ struct ImGui_ImplVulkan_RenderState
 //
 // Your engine/app will likely _already_ have code to setup all that stuff (swap chain,
 // render pass, frame buffers, etc.). You may read this code if you are curious, but
-// it is recommended you use you own custom tailored code to do equivalent work.
+// it is recommended you use your own custom tailored code to do equivalent work.
 //
 // We don't provide a strong guarantee that we won't change those functions API.
 //
 // The ImGui_ImplVulkanH_XXX functions should NOT interact with any of the state used
-// by the regular ImGui_ImplVulkan_XXX functions).
+// by the regular ImGui_ImplVulkan_XXX functions.
 //-------------------------------------------------------------------------
 
 struct ImGui_ImplVulkanH_Frame;

@@ -64,7 +64,16 @@ static ImGui_ImplVulkanH_Window g_MainWindowData;
 SDL_Window*                     window;
 std::atomic<bool>               g_RenderPaused{false};
 static uint32_t                 g_MinImageCount = 2;
+static VkImageUsageFlags        g_SwapChainImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // new api
 static bool                     g_SwapChainRebuild = false;
+
+VkFormat swapchain_image_format; // experimental
+
+struct SurfaceFormat {
+    VkFormat format;
+    VkColorSpaceKHR colorSpace;
+};
+
 
 // TextureData struct code from https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
 struct TextureData {
@@ -230,6 +239,36 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, 
     return VK_FALSE;
 }
 #endif
+
+SurfaceFormat choose_swapchain_surface_format(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
+    // query supported surface formats
+    uint32_t formatCount = 0;
+    VkResult r = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
+    if (r != VK_SUCCESS || formatCount == 0) {
+        throw std::runtime_error("failed to get physical device surface formats");
+    }
+
+    std::vector<VkSurfaceFormatKHR> availableFormats(formatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, availableFormats.data());
+
+    // prefer sRGB format with common color space
+    for (const auto &f : availableFormats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return { f.format, f.colorSpace };
+    }
+    for (const auto &f : availableFormats) {
+        if (f.format == VK_FORMAT_R8G8B8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return { f.format, f.colorSpace };
+    }
+
+    // "any format is fine"
+    if (availableFormats.size() == 1 && availableFormats[0].format == VK_FORMAT_UNDEFINED) {
+        return { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+    }
+
+    // fallback (pick first available)
+    return { availableFormats[0].format, availableFormats[0].colorSpace };
+}
 
 static bool CheckFile(const char* path) {
     struct stat info;
@@ -539,29 +578,42 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     // check for WSI support
     VkBool32 res;
     vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily, wd->Surface, &res);
-    if (res != VK_TRUE) {
-        fprintf(stderr, "[ERROR] (Vulkan) No WSI support on physical device 0\n");
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0\n");
+    if (res != VK_TRUE)
+    {
+        fprintf(stderr, "Error no WSI support on physical device 0\n");
         exit(-1);
     }
+    // create swapchain
+    {
+        auto chosen = choose_swapchain_surface_format(g_PhysicalDevice, surface);
+        swapchain_image_format = chosen.format;
+        VkColorSpaceKHR swapchain_color_space = chosen.colorSpace;
 
-    // select surface format
+        VkSwapchainCreateInfoKHR swapchainInfo = {};
+        swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        swapchainInfo.surface = surface;
+        swapchainInfo.minImageCount = g_MinImageCount;
+        swapchainInfo.imageFormat = swapchain_image_format;
+        swapchainInfo.imageColorSpace = swapchain_color_space;
+
+    }
+
+    // select Surface Format
     const VkFormat requestSurfaceImageFormat[] = { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8_UNORM, VK_FORMAT_R8G8B8_UNORM };
     const VkColorSpaceKHR requestSurfaceColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
     wd->SurfaceFormat = ImGui_ImplVulkanH_SelectSurfaceFormat(g_PhysicalDevice, wd->Surface, requestSurfaceImageFormat, (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat), requestSurfaceColorSpace);
 
-    // select present mode
+    // select Present Mode
 #ifdef APP_USE_UNLIMITED_FRAME_RATE
     VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR };
 #else
     VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_FIFO_KHR };
 #endif
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, wd->Surface, &present_modes[0], IM_ARRAYSIZE(present_modes));
-    //printf("[INFO] (Vulkan) Selected PresentMode = %d\n", wd->PresentMode);
+    //printf("[vulkan] Selected PresentMode = %d\n", wd->PresentMode);
 
     IM_ASSERT(g_MinImageCount >= 2);
-    ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-}
+    ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount, g_SwapChainImageUsage);}
 
 static void VkCleanup() {
     vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
@@ -1237,30 +1289,93 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // setup platform/renderer backends
     ImGui_ImplSDL2_InitForVulkan(window);
     
-    ImGui_ImplVulkan_InitInfo init_info = {};
+    if (swapchain_image_format == VK_FORMAT_UNDEFINED) {
+        std::cerr << "[ERROR] (Vulkan): swapchain_image_format not selected before initializing ImGui Vulkan backend" << std::endl;
+        // TODO: handle error
+    }
+
+
+    VkAttachmentDescription colorAttachment = {};
+    colorAttachment.format = swapchain_image_format; // set earlier by choose_swapchain_surface_format()
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorRef = {};
+    colorRef.attachment = 0;
+    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+
+    VkRenderPassCreateInfo rpci = {};
+    rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpci.attachmentCount = 1;
+    rpci.pAttachments = &colorAttachment;
+    rpci.subpassCount = 1;
+    rpci.pSubpasses = &subpass;
+
+    VkRenderPass imguiRenderPass = VK_NULL_HANDLE;
+    VkResult VkRes = vkCreateRenderPass(g_Device, &rpci, nullptr, &imguiRenderPass);
+    if (VkRes != VK_SUCCESS) {
+        fprintf(stderr, "vkCreateRenderPass failed: %d\n", VkRes);
+        // TODO: handle error
+    }
+
+
+    // ImGui_ImplVulkan_InitInfo init_info = {};
 
     //init_info.ApiVersion = VK_API_VERSION_1_3;              // pass in value of VkApplicationInfo::apiVersion, otherwise will default to header version.
+//     init_info.Instance = g_Instance;
+//     init_info.PhysicalDevice = g_PhysicalDevice;
+//     init_info.Device = g_Device;
+//     init_info.QueueFamily = g_QueueFamily;
+//     init_info.Queue = g_Queue;
+//     init_info.PipelineCache = g_PipelineCache;
+//     init_info.DescriptorPool = g_DescriptorPool;
+//     init_info.MinImageCount = g_MinImageCount;
+//     init_info.ImageCount = wd->ImageCount;
+//     init_info.Allocator = g_Allocator;
+// #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING // new api change
+//     init_info.UseDynamicRendering = true;
+//     VkFormat color_fmt = VK_FORMAT_B8G8R8A8_UNORM;
+//     VkFormat color_attachment_formats[1] = { color_fmt };
+// #else
+//     init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+//     init_info.RenderPass = wd->RenderPass;
+//     init_info.Subpass = 0;
+// #endif
+// lower-case comment - fill ImGui_ImplVulkan_InitInfo (zero-clear first)
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    memset(&init_info, 0, sizeof(init_info));
+    init_info.ApiVersion = 0; // optional: leave 0 to use header default
     init_info.Instance = g_Instance;
     init_info.PhysicalDevice = g_PhysicalDevice;
     init_info.Device = g_Device;
     init_info.QueueFamily = g_QueueFamily;
     init_info.Queue = g_Queue;
-    init_info.PipelineCache = g_PipelineCache;
     init_info.DescriptorPool = g_DescriptorPool;
+    init_info.DescriptorPoolSize = 0; // optional: 0 uses DescriptorPool
     init_info.MinImageCount = g_MinImageCount;
     init_info.ImageCount = wd->ImageCount;
+    init_info.PipelineCache = g_PipelineCache;
     init_info.Allocator = g_Allocator;
-#ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING // new api change
-    init_info.UseDynamicRendering = true;
-    VkFormat color_fmt = VK_FORMAT_B8G8R8A8_UNORM;
-    VkFormat color_attachment_formats[1] = { color_fmt };
-#else
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    init_info.RenderPass = wd->RenderPass;
-    init_info.Subpass = 0;
-#endif
     init_info.CheckVkResultFn = check_vk_result;
+    init_info.MinAllocationSize = 1; // optional, set to 1 or a sensible page size
 
+    // set PipelineInfoMain fields (RenderPass, Subpass, MSAASamples)
+    init_info.PipelineInfoMain.RenderPass = imguiRenderPass;
+    init_info.PipelineInfoMain.Subpass = 0;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT; // 0 would default to 1
+
+    // disable to avoid crashing on other platforms
+    init_info.UseDynamicRendering = false;
 
     ImGui_ImplVulkan_Init(&init_info);
 
@@ -1416,8 +1531,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         SDL_GetWindowSize(window, &fb_width, &fb_height);
         if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height)) {
             ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
-            ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-            g_MainWindowData.FrameIndex = 0;
+
+            ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount, g_SwapChainImageUsage);           g_MainWindowData.FrameIndex = 0;
             g_SwapChainRebuild = false;
         }
 

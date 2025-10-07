@@ -58,6 +58,7 @@ static uint32_t                 g_QueueFamily = (uint32_t)-1;
 static VkQueue                  g_Queue = VK_NULL_HANDLE;       
 static VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
 static VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
+static VkDescriptorSetLayout    g_DescriptorSetLayout = VK_NULL_HANDLE; // for manual font upload
 static VkCommandPool            g_CommandPool = VK_NULL_HANDLE;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
@@ -580,7 +581,8 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily, wd->Surface, &res);
     if (res != VK_TRUE)
     {
-        fprintf(stderr, "Error no WSI support on physical device 0\n");
+        fprintf(stderr, "[ERROR] (Vulkan) No WSI support on physical device 0\n");
+        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0\n");
         exit(-1);
     }
     // create swapchain
@@ -1275,15 +1277,15 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.Colors[ImGuiCol_TextSelectedBg]        = ImVec4(tcr, tcg, tcb, 0.45f);
     style.Colors[ImGuiCol_PopupBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.9f);
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
-    io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
-    io.Fonts->Clear();
-    if (cfg.get<std::string>("ui_custom_font", "") != "false") {
-        io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
-    }
-    else {
-        std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
-        io.Fonts->AddFontDefault();
-    }
+    // io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
+    // io.Fonts->Clear();
+    // if (cfg.get<std::string>("ui_custom_font", "") != "false") {
+    //     io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
+    // }
+    // else {
+    //     std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
+    //     io.Fonts->AddFontDefault();
+    // }
     
     
     // setup platform/renderer backends
@@ -1382,58 +1384,166 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     // manual font upload
     {
         ImGuiIO& io = ImGui::GetIO();
-        unsigned char* pixels; int w, h;
-        io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
+        unsigned char* pixels = nullptr;
+        int texW = 0, texH = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &texW, &texH); // return 4-channel RGBA
+
+        if (pixels == nullptr || texW <= 0 || texH <= 0) {
+            // nothing to upload
+            fprintf(stderr, "imgui font: no pixels returned\n");
+            exit(-1);
+        }
+
+        const VkDeviceSize imageSize = (VkDeviceSize)texW * (VkDeviceSize)texH * 4ull;
 
         // create staging buffer
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
+        VkBuffer stagingBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
         createBuffer(g_Device, g_PhysicalDevice,
-                     w * h * 4,
+                     imageSize,
                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                      stagingBuffer, stagingBufferMemory);
-        
-        // copy pixel data
-        void* data;
-        vkMapMemory(g_Device, stagingBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
-        memcpy(data, pixels, (size_t)(w * h * 4));
+
+        // map & copy pixels
+        void* mapped = nullptr;
+        VkResult res = vkMapMemory(g_Device, stagingBufferMemory, 0, imageSize, 0, &mapped);
+        if (res != VK_SUCCESS || mapped == nullptr) {
+            fprintf(stderr, "vkMapMemory failed: %d\n", res);
+            // cleanup
+            if (stagingBuffer != VK_NULL_HANDLE) vkDestroyBuffer(g_Device, stagingBuffer, nullptr);
+            if (stagingBufferMemory != VK_NULL_HANDLE) vkFreeMemory(g_Device, stagingBufferMemory, nullptr);
+            exit(-1);
+        }
+        memcpy(mapped, pixels, (size_t)imageSize);
         vkUnmapMemory(g_Device, stagingBufferMemory);
-        
-        // create the GPU image
-        VkDeviceMemory fontImageMemory;
-        VkImage fontImage = CreateFontImage(g_Device, g_PhysicalDevice, w, h, fontImageMemory);
-        
-        // transition, copy & transition back
+
+        // create GPU image
+        VkImage fontImage = VK_NULL_HANDLE;
+        VkDeviceMemory fontImageMemory = VK_NULL_HANDLE;
+
+        auto CreateImage = [&](uint32_t width, uint32_t height, VkFormat format,
+                               VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+                               VkImage& imageOut, VkDeviceMemory& memoryOut)->bool {
+            VkImageCreateInfo imageInfo{};
+            imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width = width;
+            imageInfo.extent.height = height;
+            imageInfo.extent.depth = 1;
+            imageInfo.mipLevels = 1;
+            imageInfo.arrayLayers = 1;
+            imageInfo.format = format;
+            imageInfo.tiling = tiling;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            imageInfo.usage = usage;
+            imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            if (vkCreateImage(g_Device, &imageInfo, nullptr, &imageOut) != VK_SUCCESS) {
+                fprintf(stderr, "failed to create image\n");
+                return false;
+            }
+
+            VkMemoryRequirements memReq;
+            vkGetImageMemoryRequirements(g_Device, imageOut, &memReq);
+
+            VkMemoryAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.allocationSize = memReq.size;
+            allocInfo.memoryTypeIndex = findMemoryType(g_PhysicalDevice, memReq.memoryTypeBits, properties);
+
+            if (vkAllocateMemory(g_Device, &allocInfo, nullptr, &memoryOut) != VK_SUCCESS) {
+                fprintf(stderr, "failed to allocate image memory\n");
+                vkDestroyImage(g_Device, imageOut, nullptr);
+                return false;
+            }
+
+            vkBindImageMemory(g_Device, imageOut, memoryOut, 0);
+            return true;
+        };
+
+        // create font image
+        if (!CreateImage((uint32_t)texW, (uint32_t)texH, VK_FORMAT_R8G8B8A8_UNORM,
+                         VK_IMAGE_TILING_OPTIMAL,
+                         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                         fontImage, fontImageMemory)) {
+            // cleanup staging
+            vkDestroyBuffer(g_Device, stagingBuffer, nullptr);
+            vkFreeMemory(g_Device, stagingBufferMemory, nullptr);
+            exit(-1);
+        }
+
+        // record copy & layout transitions on a single-use command buffer
         VkCommandBuffer cmd = beginSingleTimeCommands(g_Device, g_CommandPool);
+
+        // transition undefined -> transfer dst
         transitionImageLayout(cmd, fontImage, VK_FORMAT_R8G8B8A8_UNORM,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkBufferImageCopy region{ };
-        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0,0,1 };
-        region.imageExtent = { (uint32_t)w, (uint32_t)h, 1 };
-        vkCmdCopyBufferToImage(cmd, stagingBuffer, fontImage,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        // prepare buffer -> image copy region
+        VkBufferImageCopy region{};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = { 0, 0, 0 };
+        region.imageExtent = { (uint32_t)texW, (uint32_t)texH, 1 };
+
+        vkCmdCopyBufferToImage(cmd, stagingBuffer, fontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        // transition transfer dst -> shader read
         transitionImageLayout(cmd, fontImage, VK_FORMAT_R8G8B8A8_UNORM,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
         endSingleTimeCommands(g_Device, g_CommandPool, g_Queue, cmd);
         
-        // cleanup staging
-        vkDestroyBuffer(g_Device, stagingBuffer, nullptr);
-        vkFreeMemory(g_Device, stagingBufferMemory, nullptr);
-        
-        // create view & sampler
+        // create image view & sampler
         VkImageView fontView = CreateFontImageView(g_Device, fontImage);
         VkSampler   fontSampler = CreateFontSampler(g_Device);
-        
-        // register with ImGui
-        VkDescriptorSet desc = ImGui_ImplVulkan_AddTexture(
-            fontSampler, fontView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        );
-        // io.Fonts->SetTexID((ImTextureID)desc);
-        // io.Fonts->ClearTexData();
-        io.Fonts->Clear(); // new api
+        // register descriptor
+        VkDescriptorSetLayoutBinding fontBinding{};
+        fontBinding.binding = 0;
+        fontBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        fontBinding.descriptorCount = 1;
+        fontBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fontBinding.pImmutableSamplers = nullptr;
 
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &fontBinding;
+
+        vkCreateDescriptorSetLayout(g_Device, &layoutInfo, nullptr, &g_DescriptorSetLayout);
+        VkDescriptorSet desc = ImGui_ImplVulkan_AddTexture(
+            fontSampler,
+            fontView,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+        // set texture ID
+        // io.Fonts->SetTexID((ImTextureID)desc);
+        // free staging resources
+
+        io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
+        io.Fonts->Clear();
+        if (cfg.get<std::string>("ui_custom_font", "") != "false") {
+            io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
+        }
+        else {
+            std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
+            io.Fonts->AddFontDefault();
+        }
+        vkDestroyBuffer(g_Device, stagingBuffer, nullptr);
+        vkFreeMemory(g_Device, stagingBufferMemory, nullptr);
+
+        // io.Fonts->Clear();
+    
     }
+
 
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
     // configuration variables (currently no way of avoiding)

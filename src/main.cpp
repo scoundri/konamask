@@ -143,10 +143,60 @@ static std::string now = [](){
 }();
 
 static bool first() {
+    #ifdef _WIN32 // not yet tested
+    PWSTR knownPath = nullptr;
+    std::wstring base;
+    std::string path;
+    std::string backup;
+    std::wstring confpath = L"konacode\\konamask\\config.ini"
+    std::wstring backupconfpath = L"konacode\\konamask\\backup-config.ini"
+    HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &knownPath);
+    if (SUCCEEDED(hr) && knownPath) {
+        base.assign(knownPath);
+        CoTaskMemFree(knownPath);
+    } 
+    else {
+        // LOCALAPPDATA env var
+        wchar_t buf[MAX_PATH];
+        DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+        if (len > 0 && len < MAX_PATH) {
+            base.assign(buf, len);
+        } 
+        else {
+            // USERPROFILE + "\\AppData\\Local"
+            len = GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
+            if (len > 0 && len < MAX_PATH) {
+                base.assign(buf, len);
+                base += L"\\AppData\\Local";
+            } else {
+                // return relative path under current working directory
+                std::wstring fallback = confpath;
+                return wide_to_utf8(fallback);
+            }
+        }
+    }
+
+
+    std::filesystem::path dir = std::filesystem::path(base) / confpath;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec); // ignore errors
+
+    std::filesystem::path full = dir;
+    path = wide_to_utf8(full.wstring());
+
+    dir = std::filesystem::path(base) / backupconfpath;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec); // ignore errors
+
+    full = dir;
+    backup = wide_to_utf8(full.wstring());
+
+#else
     char path[PATH_MAX];
     char backup[PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
-    snprintf(path, sizeof(path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config_backup.ini");
+    snprintf(backup, sizeof(backup), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config_backup.ini");
+#endif
     struct stat info;
 
     if (stat(path, &info) != 0) {
@@ -171,6 +221,10 @@ static bool first() {
             mkdir(config_dir, 0777); // ignore errors for existing dirs
             *p = '/';
         }
+    }
+        if (mkdir(config_dir, 0755) != 0 && errno != EEXIST) {
+        perror("mkdir final");
+        std::cout << "[ERROR] Directory \"" << config_dir << "\" could not be created!" << std::endl;
     }
     std::cout << "[INFO] Directory \"" << config_dir << "\" was checked/created successfully!" << std::endl;
 
@@ -252,10 +306,10 @@ int main() {
     Logger::Initialize();
     if (cfg.get<bool>("enable_logging_to_file", false)) {
         std::cout << "[INFO] Logger has been enabled!" << std::endl;
-        Logger::GetInstance().log("\n\n\n\n\n\n\n\n>────────────────────────────────────────────────[KONAMASK STARTED @ ");
+        Logger::GetInstance().log("\n\n\n\n\n\n\n\n>------------------------------------------------[KONAMASK STARTED @ ");
             std::time_t t = std::time(nullptr); char b[20];
         Logger::GetInstance().log(now);
-        Logger::GetInstance().log("]────────────────────────────────────────────────<\n\n     occ.                            .klccc.                \n"
+        Logger::GetInstance().log("]>------------------------------------------------[<\n\n     occ.                            .klccc.                \n"
     "    dcc                           o0xlccccd00O00KXNk.       \n"
     "   ,cl'              .OXK00OOOOOkoccccccc'......;ccc::clxO, \n"
     "   .ld.         .KOxocccccccccllccccccccc:...               \n"

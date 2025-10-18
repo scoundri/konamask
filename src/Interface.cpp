@@ -228,7 +228,7 @@ static void check_vk_result(VkResult err) {
     if (err == VK_SUCCESS) 
         return;
     fprintf(stderr, "[ERROR] (Vulkan) VkResult = %d\n", err);
-    Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) VkResult failed!\n");
+    Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) VkResult failed!\n");
     if (err < 0)
         abort();
 }
@@ -396,7 +396,7 @@ void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format,
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) transitionImageLayout: Unsupported layout transition\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) transitionImageLayout: Unsupported layout transition\n");
         throw std::invalid_argument("[ERROR] Unsupported layout transition!");
     }
 
@@ -419,7 +419,7 @@ void createBuffer(VkDevice device, VkPhysicalDevice physDevice, VkDeviceSize siz
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) createBuffer: Failed to create buffer!\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) createBuffer: Failed to create buffer!\n");
         throw std::runtime_error("[ERROR] Failed to create buffer!");
     }
 
@@ -431,7 +431,7 @@ void createBuffer(VkDevice device, VkPhysicalDevice physDevice, VkDeviceSize siz
     allocInfo.memoryTypeIndex = findMemoryType(physDevice, memRequirements.memoryTypeBits, properties);
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) vkGetBufferMemoryRequirements: Failed to allocate buffer memory!\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) vkGetBufferMemoryRequirements: Failed to allocate buffer memory!\n");
         throw std::runtime_error("[ERROR] Failed to allocate buffer memory!");
     }
 
@@ -446,7 +446,7 @@ static void CreateCommandPool() {
     poolInfo.queueFamilyIndex = g_QueueFamily;   // same family as your graphics queue
 
     if (vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool) != VK_SUCCESS) {
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) CreateCommandPool: Failed to create command pool!\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) CreateCommandPool: Failed to create command pool!\n");
         throw std::runtime_error("[ERROR] Failed to create command pool!");
     }
 }
@@ -582,7 +582,7 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     if (res != VK_TRUE)
     {
         fprintf(stderr, "[ERROR] (Vulkan) No WSI support on physical device 0\n");
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan) No WSI support on physical device 0\n");
         exit(-1);
     }
     // create swapchain
@@ -1175,7 +1175,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
     if (window == nullptr) {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
-        Logger::GetInstance().log("\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n");
+        Logger::GetInstance().log("\n\n>------------[EXCEPTION]------------<\n\n[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n");
         Logger::GetInstance().log(SDL_GetError());
         Logger::GetInstance().log("\n");
         return -1;
@@ -1239,43 +1239,81 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     ImVec4 theme_color(tcr, tcg, tcb, 1.0f); // only needed for the GUI
 
     ImGuiStyle& style = ImGui::GetStyle();
-    style.Colors[ImGuiCol_Text]                  = ImVec4(0.86f, 0.93f, 0.89f, 0.78f);
-    style.Colors[ImGuiCol_TextDisabled]          = ImVec4(0.86f, 0.93f, 0.89f, 0.28f);
-    style.Colors[ImGuiCol_WindowBg]              = ImVec4(0.05f, 0.06f, 0.12f, 0.86f);
-    style.Colors[ImGuiCol_Border]                = ImVec4(0.02f, 0.03f, 0.09f, 0.86f);
-    style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.02f, 0.03f, 0.09f, 0.00f);
-    style.Colors[ImGuiCol_FrameBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.78f);
-    style.Colors[ImGuiCol_FrameBgHovered]        = ImVec4(tcr, tcg, tcb, 0.45f);
-    style.Colors[ImGuiCol_FrameBgActive]         = ImVec4(tcr, tcg, tcb, 0.72f);
+    // style.Colors[ImGuiCol_Text]                  = ImVec4(0.86f, 0.93f, 0.89f, 0.78f);
+    // style.Colors[ImGuiCol_TextDisabled]          = ImVec4(0.86f, 0.93f, 0.89f, 0.28f);
+    // style.Colors[ImGuiCol_WindowBg]              = ImVec4(0.05f, 0.06f, 0.12f, 0.86f);
+    // style.Colors[ImGuiCol_Border]                = ImVec4(0.02f, 0.03f, 0.09f, 0.86f);
+    // style.Colors[ImGuiCol_BorderShadow]          = ImVec4(0.02f, 0.03f, 0.09f, 0.00f);
+    // style.Colors[ImGuiCol_FrameBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.78f);
+    // style.Colors[ImGuiCol_FrameBgHovered]        = ImVec4(tcr, tcg, tcb, 0.45f);
+    // style.Colors[ImGuiCol_FrameBgActive]         = ImVec4(tcr, tcg, tcb, 0.72f);
     style.Colors[ImGuiCol_TitleBg]               = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
     style.Colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.20f, 0.22f, 0.27f, 0.75f);
     style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(tcr, tcg, tcb, 0.86f);
-    style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.20f, 0.22f, 0.27f, 0.47f);
-    style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 0.00f);
-    style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 0.86f);
+    // style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.20f, 0.22f, 0.27f, 0.47f);
+    // style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 0.00f);
+    // style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 0.86f);
     style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(tcr, tcg, tcb, 0.36f);
     style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(tcr, tcg, tcb, 0.86f);
     style.Colors[ImGuiCol_CheckMark]             = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_SliderGrab]            = ImVec4(tcr, tcg, tcb, 0.96f);
     style.Colors[ImGuiCol_SliderGrabActive]      = ImVec4(tcr, tcg, tcb, 0.10f);
-    style.Colors[ImGuiCol_Button]                = ImVec4(0.47f, 0.77f, 0.83f, 0.14f);
-    style.Colors[ImGuiCol_ButtonHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
-    style.Colors[ImGuiCol_ButtonActive]          = ImVec4(tcr, tcg, tcb, 1.00f);
-    style.Colors[ImGuiCol_Header]                = ImVec4(tcr, tcg, tcb, 0.76f);
-    style.Colors[ImGuiCol_HeaderHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
-    style.Colors[ImGuiCol_HeaderActive]          = ImVec4(tcr, tcg, tcb, 0.86f);
+    // style.Colors[ImGuiCol_Button]                = ImVec4(0.47f, 0.77f, 0.83f, 0.14f);
+    // style.Colors[ImGuiCol_ButtonHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
+    // style.Colors[ImGuiCol_ButtonActive]          = ImVec4(tcr, tcg, tcb, 1.00f);
+    // style.Colors[ImGuiCol_Header]                = ImVec4(tcr, tcg, tcb, 0.76f);
+    // style.Colors[ImGuiCol_HeaderHovered]         = ImVec4(tcr, tcg, tcb, 0.86f);
     style.Colors[ImGuiCol_Separator]             = ImVec4(0.14f, 0.16f, 0.19f, 1.00f);
     style.Colors[ImGuiCol_SeparatorHovered]      = ImVec4(tcr, tcg, tcb, 0.78f);
     style.Colors[ImGuiCol_SeparatorActive]       = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_ResizeGrip]            = ImVec4(0.47f, 0.77f, 0.83f, 0.04f);
     style.Colors[ImGuiCol_ResizeGripHovered]     = ImVec4(tcr, tcg, tcb, 0.78f);
     style.Colors[ImGuiCol_ResizeGripActive]      = ImVec4(tcr, tcg, tcb, 1.00f);
-    style.Colors[ImGuiCol_PlotLines]             = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
-    style.Colors[ImGuiCol_PlotLinesHovered]      = ImVec4(tcr, tcg, tcb, 1.00f);
-    style.Colors[ImGuiCol_PlotHistogram]         = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
+    // style.Colors[ImGuiCol_PlotLines]             = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
+    // style.Colors[ImGuiCol_PlotLinesHovered]      = ImVec4(tcr, tcg, tcb, 1.00f);
+    // style.Colors[ImGuiCol_PlotHistogram]         = ImVec4(0.86f, 0.93f, 0.89f, 0.63f);
     style.Colors[ImGuiCol_PlotHistogramHovered]  = ImVec4(tcr, tcg, tcb, 1.00f);
     style.Colors[ImGuiCol_TextSelectedBg]        = ImVec4(tcr, tcg, tcb, 0.45f);
-    style.Colors[ImGuiCol_PopupBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.9f);
+    // style.Colors[ImGuiCol_PopupBg]               = ImVec4(0.20f, 0.22f, 0.27f, 0.9f);
+
+    style.Colors[ImGuiCol_WindowBg]     = ImVec4(0.04f, 0.05f, 0.06f, 0.64f);
+    style.Colors[ImGuiCol_ChildBg]      = ImVec4(0.06f, 0.07f, 0.08f, 0.56f);
+    style.Colors[ImGuiCol_PopupBg]      = ImVec4(0.06f, 0.07f, 0.08f, 0.92f);
+    style.Colors[ImGuiCol_Border]       = ImVec4(0.14f, 0.16f, 0.18f, 0.25f);
+
+    // text
+    style.Colors[ImGuiCol_Text]         = ImVec4(0.93f, 0.94f, 0.95f, 1.00f);
+    style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.56f, 0.58f, 0.60f, 1.00f);
+
+    // accent
+    ImVec4 accent = ImVec4(0.30f, 0.55f, 1.00f, 1.00f);
+    style.Colors[ImGuiCol_Header]         = ImVec4(tcr, tcg, tcb, 0.30f);
+    style.Colors[ImGuiCol_HeaderHovered]  = ImVec4(tcr, tcg, tcb, 0.95f);
+    style.Colors[ImGuiCol_HeaderActive]   = ImVec4(tcr*0.8, tcg*0.8, tcb*0.8, 0.86f);
+    style.Colors[ImGuiCol_Button]         = ImVec4(accent.x*0.10f, accent.y*0.12f, accent.z*0.18f, 0.6f);
+    style.Colors[ImGuiCol_ButtonHovered]  = ImVec4(tcr, tcg, tcb, 0.95f);
+    style.Colors[ImGuiCol_ButtonActive]   = ImVec4(tcr*0.5, tcg*0.5, tcb*0.5, 0.95f);
+
+    // frames / inputs
+    style.Colors[ImGuiCol_FrameBg]        = ImVec4(0.09f, 0.10f, 0.11f, 0.7f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.12f, 0.14f, 0.16f, 0.95f);
+    style.Colors[ImGuiCol_FrameBgActive]  = ImVec4(tcr, tcg, tcb, 1.00f);
+
+    // small UI niceties
+    style.Colors[ImGuiCol_Separator]      = ImVec4(0.12f,0.14f,0.16f,0.45f);
+    //C[ImGuiCol_TooltipBg]      = ImVec4(0.06f,0.07f,0.08f,0.95f);
+
+    // rounding / spacing
+    style.WindowRounding    = 1.0f;
+    style.ChildRounding     = 1.0f;
+    style.FrameRounding     = 1.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.ItemSpacing       = ImVec2(10, 8);
+    style.WindowPadding     = ImVec2(10, 8);
+    style.FramePadding      = ImVec2(10, 8);
+
+
+    style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     style.ScaleAllSizes(main_scale);    // bake a fixed style scale
     // io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
     // io.Fonts->Clear();
@@ -1581,12 +1619,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     bool stats = false;
     static std::string logFile = "";
     ImGuiListClipper clipperC;
-    float contacts_col_w = 280.0f, right_info_w = 300.0f;
+    float right_info_w = 300.0f;
     float contact_row_h = 36.0f, avatar_size = 32.0f;
     float name_offset_x = 6.0f, name_offset_y = 4.0f;
 
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
-    bool imgbg = (CheckFile(image_path) && cfg.get<bool>("enable_custom_background", false));
+    bool imgbg = CheckFile(image_path) && cfg.get<bool>("enable_custom_background", false);
     float r;
     float g;
     float b;
@@ -1666,7 +1704,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         
         ImGui::SetCursorPosX(20.0f);
         ImGui::SetCursorPosY(15.0f);
-        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "koncloak");
+        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "konamask");
 
         // account button at right
         ImGui::SetCursorPosX(fb_width - 310.0f);
@@ -1674,7 +1712,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (ImGui::Button("Settings##top", ImVec2(100.0f, 28.0f))) settings = !settings;
         ImGui::SetCursorPosX(fb_width - 200.0f);
         ImGui::SetCursorPosY(10.0f);
-        ImGui::Button("Account##top", ImVec2(100.0f, 28.0f));
+        if (ImGui::Button("Log##top", ImVec2(100.0f, 28.0f))) debug_log = !debug_log;
         ImGui::SetCursorPosX(fb_width - 92.0f);
         ImGui::SetCursorPosY(10.0f);
         if (ImGui::Button("T", ImVec2(28.0f, 28.0f))) Minimize();
@@ -1699,40 +1737,40 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
 
         // contacts column
-        ImGui::BeginChild("ContactsCol", ImVec2(contacts_col_w, 0), true);
+        ImGui::BeginChild("Sidebar", ImVec2(fb_width/2.0, 0), true);
         
         ImGui::BeginGroup();
         ImGui::SetCursorPosY(20.0f);
         ImGui::TextUnformatted("Direct Messages");
         ImGui::CalcTextSize("Direct Messages");
+        if (ImGui::Button("Settings", ImVec2(108.0f, 28.0f))) settings = !settings;
 
-        // plus button
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 44.0f);
-        ImGui::SetCursorPosY(12.0f);
-        if (ImGui::Button("+", ImVec2(32, 32))) {
-            // TODO: add friend function + popup -> file manager from konamask
-        }
         ImGui::EndGroup();
         ImGui::Separator();
 
 
         // bottom (status / quick controls)
-        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 54);
-        ImGui::Separator();
+        // ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ((debug_log) ? fb_height/3.0 : 0));
+        // ImGui::Separator();
 
+        // if (debug_log) {
+            
+        //     logFile = ReadFileToString();
+            
+        //     ImGui::Separator();
+        //     ImGui::TextWrapped("%s", logFile.c_str());
+        // }
+        // ImGui::SetCursorPosX(68.0f);
+        // ImGui::TextDisabled("Account:");
+        // ImGui::SameLine();
+        // ImGui::TextUnformatted("");
 
-        ImGui::SetCursorPosX(68.0f);
-        ImGui::TextDisabled("Account:");
-        ImGui::SameLine();
-        ImGui::TextUnformatted("");
+        // ImGui::SetCursorPosX(68.0f);
+        // ImGui::TextDisabled("Status:");
+        // ImGui::SameLine();
+        // ImGui::TextUnformatted("");
 
-        ImGui::SetCursorPosX(68.0f);
-        ImGui::TextDisabled("Status:");
-        ImGui::SameLine();
-        ImGui::TextUnformatted("");
-
-        ImGui::EndChild(); // ContactsCol
+        ImGui::EndChild(); // Sidebar
         ImGui::SameLine();
 
 
@@ -1939,9 +1977,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::ShowDebugLogWindow();
     }
     if (debug_log) {
-        ImGui::Begin("koncloak log");
+        ImGui::SetNextWindowPos(ImVec2(0, fb_height-200), ImGuiCond_Once);
+        ImGui::SetNextWindowSize(ImVec2(fb_width,0), ImGuiCond_Always);
+        ImGui::Begin("konamask log", &debug_log, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove);
 
-         logFile = ReadFileToString();
+        logFile = ReadFileToString();
 
         ImGui::Separator();
         ImGui::TextWrapped("%s", logFile.c_str());
@@ -1953,7 +1993,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         {
             ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(fb_width,fb_height), ImGuiCond_Always);
         
             ImGui::Begin("background", nullptr,
                          ImGuiWindowFlags_NoMove |
@@ -2180,49 +2220,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         
             ImGui::End();
         }
-        {
-            
-            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
-            static float f = 0.0f;
-            ImGui::Begin("konamask dashboard", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
-            ImGui::SetNextWindowSize(ImGui::GetWindowSize());
-            ImGui::Text("konamask voice transforming utility");
-            ImGui::Checkbox("open settings", &settings);
-            ImGui::Checkbox("open manual voice output", &manual);
-            ImGui::Checkbox("enable performance statistics", &stats);
-            ImGui::Checkbox("open ImGui debug log", &imgui_debug);
-            if (debug_log_enabled) {
-                ImGui::Checkbox("open konamask log file", &debug_log);
-            } 
-            else { 
-                if (ImGui::Button("enable logging to file (requires restart)")) { 
-                    cfg.set<int>("enable_logging_to_file", true); 
-                    if (cfg.SaveToFile(config_path)) {
-                        std::cout << "[INFO] Successfully applied!" << std::endl;
-                        debug_log_enabled = true;
-                    } 
-                    else { 
-                        std::cout << "[ERROR] Unable to save setting: an unexpected exception occured! - Is the file in use of another proces?" << std::endl;
-                    }
-                } 
-            }
-            ImGui::Spacing();
-            if (ImGui::Button("Minimize")) {
-                Minimize();
-            }
-            if (ImGui::Button("Exit")) {
-                if (!Shutdown(surface)) {
-                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
-                    std::exit(EXIT_FAILURE);
-                }
-            } ImGui::Dummy(ImVec2(0.0f, 20.0f));
-            if (ImGui::Button("Kill (not recommended)")) {
-                exit(EXIT_SUCCESS);
-            }
-            ImGui::End();
-
-        }
         if (imgbg) {
             // remove padding
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -2278,45 +2275,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
         }
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
-        {
-            ImGui::SetNextWindowPos(ImVec2((float)fb_width-30, -1), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(16,32), ImGuiCond_Always);
-        
-            ImGui::Begin("close", nullptr,
-                         ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoTitleBar |
-                         ImGuiWindowFlags_NoCollapse |
-                         ImGuiWindowFlags_NoResize |
-                         ImGuiWindowFlags_NoScrollbar |
-                         ImGuiWindowFlags_NoBackground);
-            ImGui::GetForegroundDrawList();
-            
-            if (ImGui::Button("T")) {
-                Minimize();
-            }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Minimize to tray");
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("X")) {
-                if (!Shutdown(surface)) {
-                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
-                    Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
-                    std::exit(EXIT_FAILURE);
-                }
-            }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Quit konamask");
-            }
-            
-            ImGui::End();
-        }
-        ImGui::PopStyleVar();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor();
         
         // rendering
         ImGui::Render();
@@ -2343,7 +2301,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
 int Interface::Initialize() {
     std::cout << "\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>────────────────[INITIALIZING GRAPHICAL USER INTERFACE]────────────────<\n\n");
+    Logger::GetInstance().log("\n>----------------[INITIALIZING GRAPHICAL USER INTERFACE]----------------<\n\n");
     // setup SDL
 #ifdef _WIN32
     ::SetProcessDPIAware();
@@ -2366,7 +2324,7 @@ int Interface::Initialize() {
 
 
     std::cout << "\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>───────────[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]──────────<\n\n");
+    Logger::GetInstance().log("\n>-----------[INITIALIZED GRAPHICAL USER INTERFACE SUCCESSULLY]----------<\n\n");
     return 0;
 }
 

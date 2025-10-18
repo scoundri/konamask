@@ -17,7 +17,7 @@ extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) 
 int TextToSpeech::Initialize() {
 Settings& cfg = Settings::GetInstance();
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n\n");
+    Logger::GetInstance().log("\n>---------------------[INITIALIZING TEXT-TO-SPEECH]---------------------<\n\n");
     // ensure loopback are loaded
     system("pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=konamask");
     system("pactl load-module module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
@@ -104,7 +104,7 @@ Settings& cfg = Settings::GetInstance();
     espeak_SetSynthCallback(SynthCallbackC);
 
     std::cout << "\n>────────────────[INITIALIZED TEXT-TO-SPEECH SUCCESSULLY]───────────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>────────────────[INITIALIZED TEXT-TO-SPEECH SUCCESSULLY]───────────────<\n\n");
+    Logger::GetInstance().log("\n>----------------[INITIALIZED TEXT-TO-SPEECH SUCCESSULLY]---------------<\n\n");
     return 0;
 }
 

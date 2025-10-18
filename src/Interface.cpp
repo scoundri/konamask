@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <string>
 #include "Logger.h"
+#include "icons.c"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -68,13 +69,14 @@ static uint32_t                 g_MinImageCount = 2;
 static VkImageUsageFlags        g_SwapChainImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // new api
 static bool                     g_SwapChainRebuild = false;
 
-VkFormat swapchain_image_format; // experimental
+VkFormat swapchain_image_format;
 
 struct SurfaceFormat {
     VkFormat format;
     VkColorSpaceKHR colorSpace;
 };
 
+ImFont* f_iconData;     // holds icon font data 
 
 // TextureData struct code from https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
 struct TextureData {
@@ -1419,6 +1421,8 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
     ImGui_ImplVulkan_Init(&init_info);
 
+ 
+
     // manual font upload
     {
         ImGuiIO& io = ImGui::GetIO();
@@ -1582,6 +1586,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     
     }
 
+    // icon font upload
+    ImFontConfig f_cfg;
+    f_cfg.FontDataOwnedByAtlas=false;
+    f_iconData = io.Fonts->AddFontFromMemoryTTF(iconData, sizeof(iconData), main_scale*16, &f_cfg);
+
 
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
     // configuration variables (currently no way of avoiding)
@@ -1654,6 +1663,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         IM_ASSERT(ret);
     }
 
+
+        bool open = false;
+        int test = -64;
+        int test2;
+
+
     ImGuiFilePicker picker;
     std::string out_path;
     SDL_Event event;
@@ -1695,7 +1710,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         //ImGui::SetNextWindowViewport(viewport->ID);
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-        ImGui::Begin("##DockRoot", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+        ImGui::Begin("##DockRoot", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
 
 
@@ -1735,12 +1750,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PopItemWidth();
         ImGui::EndChild();
 
-
         // contacts column
-        ImGui::BeginChild("Sidebar", ImVec2(fb_width/2.0, 0), true);
+        ImGui::BeginChild("Controls", ImVec2(fb_width/2.0, 0), true);
         
         ImGui::BeginGroup();
         ImGui::SetCursorPosY(20.0f);
+
         ImGui::TextUnformatted("Direct Messages");
         ImGui::CalcTextSize("Direct Messages");
         if (ImGui::Button("Settings", ImVec2(108.0f, 28.0f))) settings = !settings;
@@ -1770,12 +1785,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         // ImGui::SameLine();
         // ImGui::TextUnformatted("");
 
-        ImGui::EndChild(); // Sidebar
+        ImGui::EndChild();
         ImGui::SameLine();
 
 
         // center (DM) area
-        ImGui::BeginChild("DMCenter", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("DMCenter", ImVec2( test, 0), false, ImGuiWindowFlags_NoScrollbar);
 
         // header (contact name centered left, actions right)
         ImGui::BeginChild("DMHeader", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
@@ -1809,16 +1824,21 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SameLine();
 
 
-        // right info panel
-        ImGui::BeginChild("DMInfo", ImVec2(right_info_w, 0), true);
-        ImGui::TextDisabled("Conversation");
-        ImGui::Separator();
-        ImGui::TextUnformatted("Pinned messages");
-        ImGui::Dummy(ImVec2(0,8));
-        ImGui::TextUnformatted("Shared media");
-        ImGui::Dummy(ImVec2(0,8));
-        ImGui::TextDisabled("Settings");
         ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("Sidebar", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginGroup();
+        ImGui::SetCursorPosX(9.0f);
+        ImGui::SetCursorPosY(10.0f);
+        ImGui::PushFont(f_iconData);
+        if (ImGui::Button("R", ImVec2(36.0f, 36.0f))) {
+            open=!open;
+        }
+        if (open&&test>=-96) test-=2;
+        else if (!open&&test<=-64) test+=2;
+        ImGui::PopFont();
+        ImGui::EndGroup();
+        ImGui::Separator();
         ImGui::EndChild();
 
         ImGui::End();

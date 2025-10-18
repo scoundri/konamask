@@ -1573,7 +1573,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
         io.Fonts->Clear();
         if (cfg.get<std::string>("ui_custom_font", "") != "false") {
-            io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
+            if (CheckFile(cfg.get<std::string>("ui_custom_font", "").c_str())&&!cfg.get<std::string>("ui_custom_font", "").empty()) {
+                io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
+            } else {
+                io.Fonts->AddFontDefault();
+            }
         }
         else {
             std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
@@ -1831,11 +1835,15 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData);
-        if (ImGui::Button("R", ImVec2(36.0f, 36.0f))) {
+        
+        if (open&&test<=-100) { ImGui::PopFont(); if (ImGui::Button("Sidebar", ImVec2(std::abs(test)/1.2,34.0f))) open=!open; ImGui::PushFont(f_iconData); }
+        else {
+        if (ImGui::Button("R", ImVec2(std::abs(test)/1.8, 34.0f))) {
             open=!open;
         }
-        if (open&&test>=-96) test-=2;
-        else if (!open&&test<=-64) test+=2;
+        }
+        if (open&&test>=-148) test-=4;      // stretch
+        else if (!open&&test<=-64) test+=4; // shrink
         ImGui::PopFont();
         ImGui::EndGroup();
         ImGui::Separator();

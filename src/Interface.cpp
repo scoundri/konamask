@@ -2009,9 +2009,16 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Sidebar", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) open=!open; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("Sidebar", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) open=!open; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(12.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("");
+
+        }
         else {
-            if (ImGui::Button("R", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) {
+            if (ImGui::Button("", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) {
                 open=!open;
             }
         }
@@ -2025,7 +2032,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(60.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Overview", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=OVERVIEW_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("Overview", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=OVERVIEW_TAB; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(62.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("#");
+        }
         else {
             if (ImGui::Button("#", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=OVERVIEW_TAB;
         }
@@ -2034,7 +2047,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(100.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(102.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("(");
+        }
         else {
             if (ImGui::Button("(", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=LOG_TAB;
         }
@@ -2043,7 +2062,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(140.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Settings", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=SETTINGS_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("Settings", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=SETTINGS_TAB; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(142.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("~");
+        }
         else {
             if (ImGui::Button("~", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=SETTINGS_TAB;
         }

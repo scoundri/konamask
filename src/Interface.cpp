@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <string>
 #include "Logger.h"
+#include "font.c"
 #include "icons.c"
 
 #ifdef _WIN32
@@ -1237,7 +1238,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         tcg = static_cast<float>(cfg.get<int>("ui_theme_green", 42)) / 255.0f;
         tcb = static_cast<float>(cfg.get<int>("ui_theme_blue",  92)) / 255.0f;
     }
-    std::cout << "[INFO] Setting ImGui style theme color as following:\n[INFO] Red: " << tcr*255 << "  | (" << tcr << ")\n[INFO] Green: " << tcg*255 << "  | (" << tcg << ")\n[INFO] Blue: " << tcb*255 << "  | (" << tcb << ")" << std::endl;
     ImVec4 theme_color(tcr, tcg, tcb, 1.0f); // only needed for the GUI
 
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1572,16 +1572,21 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
         io.FontGlobalScale = main_scale;               // scales all fonts by main_scale
         io.Fonts->Clear();
+        ImFontConfig f_cfg;
+        f_cfg.FontDataOwnedByAtlas=false;
         if (cfg.get<std::string>("ui_custom_font", "") != "false") {
             if (CheckFile(cfg.get<std::string>("ui_custom_font", "").c_str())&&!cfg.get<std::string>("ui_custom_font", "").empty()) {
                 io.Fonts->AddFontFromFileTTF(cfg.get<std::string>("ui_custom_font", "").c_str(), cfg.get<int>("ui_font_size", 24) * main_scale);
             } else {
-                io.Fonts->AddFontDefault();
+                io.Fonts->AddFontFromMemoryTTF(dmsans_semibold, sizeof(dmsans_semibold), cfg.get<int>("ui_font_size", 24) * main_scale, &f_cfg);
+                // io.Fonts->AddFontDefault();
+                Logger::GetInstance().log("[ERROR] Custom font file (\""+cfg.get<std::string>("ui_custom_font", "")+"\") does not exist, using default!");
             }
         }
         else {
             std::cout << "[INFO] Font parameter was disabled, using default!" << std::endl;
-            io.Fonts->AddFontDefault();
+            io.Fonts->AddFontFromMemoryTTF(dmsans_semibold, sizeof(dmsans_semibold), cfg.get<int>("ui_font_size", 24) * main_scale, &f_cfg);
+            // io.Fonts->AddFontDefault();
         }
         vkDestroyBuffer(g_Device, stagingBuffer, nullptr);
         vkFreeMemory(g_Device, stagingBufferMemory, nullptr);
@@ -1591,9 +1596,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
 
     // icon font upload
-    ImFontConfig f_cfg;
-    f_cfg.FontDataOwnedByAtlas=false;
-    f_iconData = io.Fonts->AddFontFromMemoryTTF(iconData, sizeof(iconData), main_scale*16, &f_cfg);
+    ImFontConfig f_icon_cfg;
+    f_icon_cfg.PixelSnapH=true;
+    f_icon_cfg.FontDataOwnedByAtlas=false;
+    f_iconData = io.Fonts->AddFontFromMemoryTTF(iconData, sizeof(iconData), main_scale*14, &f_icon_cfg);
 
 
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
@@ -1658,7 +1664,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         g = static_cast<float>(cfg.get<int>("ui_bgc_green", 20)) / 255.0f;
         b = static_cast<float>(cfg.get<int>("ui_bgc_blue",  60)) / 255.0f;
     }
-    std::cout << "[INFO] Setting SDL2 background color as following:\n[INFO] Red: " << r*255 << "\n[INFO] Green: " << g*255 << "\n[INFO] Blue: " << b*255 << std::endl; 
     ImVec4 backgorund_color(r, g, b, 1.0f);
     // load user background image
     TextureData texture;
@@ -1670,8 +1675,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         enum Tabs {OVERVIEW_TAB,LOG_TAB,SETTINGS_TAB};
         enum Tabs c_tab = OVERVIEW_TAB;
         bool open = false;
-        int test = -64;
-        int test2;
+        short sidebar_size = -64;
 
 
     ImGuiFilePicker picker;
@@ -1735,17 +1739,21 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (ImGui::Button("Log##top", ImVec2(100.0f, 28.0f))) debug_log = !debug_log;
         ImGui::SetCursorPosX(fb_width - 92.0f);
         ImGui::SetCursorPosY(10.0f);
-        if (ImGui::Button("T", ImVec2(28.0f, 28.0f))) Minimize();
+        ImGui::PushFont(f_iconData); ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
+        if (ImGui::Button("", ImVec2(28.0f, 28.0f))) Minimize();
+        ImGui::PopFont(); ImGui::PopStyleVar();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Minimize to tray");
         ImGui::SetCursorPosX(fb_width - 60.0f);
         ImGui::SetCursorPosY(10.0f);
-        if (ImGui::Button("X", ImVec2(28.0f, 28.0f))) {
+        ImGui::PushFont(f_iconData); ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
+        if (ImGui::Button("9", ImVec2(28.0f, 28.0f))) {
         if (!Shutdown(surface)) {
                 std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
                 Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
                 std::exit(EXIT_FAILURE);
             }
         }
+        ImGui::PopFont(); ImGui::PopStyleVar();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Quit koncloak");
         
         // search
@@ -1793,7 +1801,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::EndChild();
         ImGui::SameLine();
 
-        ImGui::BeginChild("DMCenter", ImVec2( test, 0), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("DMCenter", ImVec2( sidebar_size, 0), false, ImGuiWindowFlags_NoScrollbar);
         switch (c_tab) {
             case OVERVIEW_TAB:
 
@@ -1817,7 +1825,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 // messages viewport
                 ImGui::BeginChild("DMMessages", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), true);
                 ImGui::PushFont(f_iconData);
-                ImGui::Text("`~");
+                ImGui::Text("");
                 ImGui::PopFont();
                 // ImDrawList* dl_main = ImGui::GetWindowDrawList();
                 // ImGuiStyle& style = ImGui::GetStyle();
@@ -2001,14 +2009,14 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&test<=-100) { ImGui::PopFont(); if (ImGui::Button("Sidebar", ImVec2(std::abs(test)/1.2,34.0f))) open=!open; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Sidebar", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) open=!open; ImGui::PushFont(f_iconData); }
         else {
-        if (ImGui::Button("R", ImVec2(std::abs(test)/1.72, 34.0f))) {
-            open=!open;
+            if (ImGui::Button("R", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) {
+                open=!open;
+            }
         }
-        }
-        if (open&&test>=-148) test-=4;      // stretch
-        else if (!open&&test<=-68) test+=4; // shrink
+        if (open&&sidebar_size>=-148) sidebar_size-=4;      // stretch
+        else if (!open&&sidebar_size<=-68) sidebar_size+=4; // shrink
         ImGui::PopFont();
         ImGui::EndGroup();
         ImGui::Separator();
@@ -2017,27 +2025,27 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(60.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&test<=-100) { ImGui::PopFont(); if (ImGui::Button("Overview", ImVec2(std::abs(test)/1.2,34.0f))) c_tab=OVERVIEW_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Overview", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=OVERVIEW_TAB; ImGui::PushFont(f_iconData); }
         else {
-        if (ImGui::Button("#", ImVec2(std::abs(test)/1.72, 34.0f))) c_tab=OVERVIEW_TAB;
+            if (ImGui::Button("#", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=OVERVIEW_TAB;
         }
         ImGui::PopFont();
         
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(100.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&test<=-100) { ImGui::PopFont(); if (ImGui::Button("Logs", ImVec2(std::abs(test)/1.2,34.0f))) c_tab=LOG_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; ImGui::PushFont(f_iconData); }
         else {
-        if (ImGui::Button("(", ImVec2(std::abs(test)/1.72, 34.0f))) c_tab=LOG_TAB;
+            if (ImGui::Button("(", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=LOG_TAB;
         }
         ImGui::PopFont();
         
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(140.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&test<=-100) { ImGui::PopFont(); if (ImGui::Button("Settings", ImVec2(std::abs(test)/1.2,34.0f))) c_tab=SETTINGS_TAB; ImGui::PushFont(f_iconData); }
+        if (open&&sidebar_size<=-100) { ImGui::PopFont(); if (ImGui::Button("Settings", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=SETTINGS_TAB; ImGui::PushFont(f_iconData); }
         else {
-        if (ImGui::Button("~", ImVec2(std::abs(test)/1.72, 34.0f))) c_tab=SETTINGS_TAB;
+            if (ImGui::Button("~", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=SETTINGS_TAB;
         }
         ImGui::PopFont();
 

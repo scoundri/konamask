@@ -1628,19 +1628,12 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     
 
     // rendering variables
-    bool settings = false;
     bool budgetfm = false;    
     char bgsuccess = 'u'; // unset
-    bool manual = false;
-    bool imgui_debug = false;
     bool debug_log_enabled = cfg.get<bool>("enable_logging_to_file", false);
-    bool debug_log = false;
     bool stats = false;
     static std::string logFile = "";
     ImGuiListClipper clipperC;
-    float right_info_w = 300.0f;
-    float contact_row_h = 36.0f, avatar_size = 32.0f;
-    float name_offset_x = 6.0f, name_offset_y = 4.0f;
 
     //bool imgbg = (cfg.get<bool>("enable_custom_background", false) &&CheckFile(image_path)); throws (idk why)
     bool imgbg = CheckFile(image_path) && cfg.get<bool>("enable_custom_background", false);
@@ -1650,7 +1643,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     
     char usr[PATH_MAX];
     snprintf(usr, sizeof(usr), "%s", getenv("HOME"));
-    static char manInput[128] = "";
+    static char manInput[512] = "";
     // validate range & convert to normalized floats
     //auto in_range = [](int v){ return (v >= 0 && v <= 255); }; defined above
     if (!in_range(cfg.get<int>("ui_bgc_red",   50)) || !in_range(cfg.get<int>("ui_bgc_green", 20)) || !in_range(cfg.get<int>("ui_bgc_blue",  60))) {
@@ -1672,7 +1665,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         IM_ASSERT(ret);
     }
 
-        enum Tabs {OVERVIEW_TAB,LOG_TAB,SETTINGS_TAB};
+        enum Tabs {OVERVIEW_TAB,MANUAL_INPUT_TAB,LOG_TAB,SETTINGS_TAB,DEBUG_TAB};
         enum Tabs c_tab = OVERVIEW_TAB;
         bool open = false;
         short sidebar_size = -64;
@@ -1728,15 +1721,18 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         
         ImGui::SetCursorPosX(20.0f);
         ImGui::SetCursorPosY(15.0f);
-        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "konamask");
+        ImGui::PushFont(f_iconData); 
+        ImGui::Text(""); ImGui::SameLine();
+        ImGui::PopFont();
+        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "KONAMASK");
 
-        // account button at right
-        ImGui::SetCursorPosX(fb_width - 310.0f);
-        ImGui::SetCursorPosY(10.0f);
-        if (ImGui::Button("Settings##top", ImVec2(100.0f, 28.0f))) settings = !settings;
-        ImGui::SetCursorPosX(fb_width - 200.0f);
-        ImGui::SetCursorPosY(10.0f);
-        if (ImGui::Button("Log##top", ImVec2(100.0f, 28.0f))) debug_log = !debug_log;
+        // // account button at right
+        // ImGui::SetCursorPosX(fb_width - 310.0f);
+        // ImGui::SetCursorPosY(10.0f);
+        // if (ImGui::Button("Settings##top", ImVec2(100.0f, 28.0f))) settings = !settings;
+        // ImGui::SetCursorPosX(fb_width - 200.0f);
+        // ImGui::SetCursorPosY(10.0f);
+        // if (ImGui::Button("Log##top", ImVec2(100.0f, 28.0f))) debug_log = !debug_log;
         ImGui::SetCursorPosX(fb_width - 92.0f);
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData); ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
@@ -1771,32 +1767,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
         ImGui::TextUnformatted("Direct Messages");
         ImGui::CalcTextSize("Direct Messages");
-        if (ImGui::Button("Settings", ImVec2(108.0f, 28.0f))) settings = !settings;
 
         ImGui::EndGroup();
         ImGui::Separator();
-
-
-        // bottom (status / quick controls)
-        // ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ((debug_log) ? fb_height/3.0 : 0));
-        // ImGui::Separator();
-
-        // if (debug_log) {
-            
-        //     logFile = ReadFileToString();
-            
-        //     ImGui::Separator();
-        //     ImGui::TextWrapped("%s", logFile.c_str());
-        // }
-        // ImGui::SetCursorPosX(68.0f);
-        // ImGui::TextDisabled("Account:");
-        // ImGui::SameLine();
-        // ImGui::TextUnformatted("");
-
-        // ImGui::SetCursorPosX(68.0f);
-        // ImGui::TextDisabled("Status:");
-        // ImGui::SameLine();
-        // ImGui::TextUnformatted("");
 
         ImGui::EndChild();
         ImGui::SameLine();
@@ -1836,11 +1809,28 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::EndChild();
             break;
 
+            case MANUAL_INPUT_TAB:
+                ImGui::SetCursorPosX(20.0f);
+                ImGui::SetCursorPosY(0.0f);
+                ImGui::BeginChild("Manual Input Tab", ImVec2(0, ImGui::GetWindowHeight()), true, ImGuiWindowFlags_NoBackground);
+                ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(20.0f);
+                ImGui::PushFont(f_iconData); 
+                ImGui::Text("I");
+                ImGui::PopFont(); ImGui::SameLine();
+                ImGui::SetCursorPosY(20.0f); ImGui::SetCursorPosX(40.0f);
+                ImGui::Text("Manual voice output:");
+                ImGui::InputTextMultiline("##Input", (char*)&manInput, IM_ARRAYSIZE(manInput), ImVec2(ImGui::GetWindowWidth()-40.0f, ImGui::GetWindowHeight()/2.8f));
+                ImGui::SetCursorPosX(ImGui::GetWindowWidth()-230.0f);
+                if (ImGui::Button("Speak through the microphone", ImVec2(200.0f,34.0f))) TextToSpeech::Verbalize((char*)&manInput);
+                ImGui::EndChild();
+            break;
+
             case LOG_TAB:
 
                 ImGui::SetCursorPosX(20.0f);
+                ImGui::SetCursorPosY(0.0f);
+                ImGui::BeginChild("Log Tab", ImVec2(ImGui::GetWindowWidth()-20, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), false, ImGuiWindowFlags_NoBackground);
                 ImGui::SetCursorPosY(20.0f);
-                ImGui::BeginChild("Logs", ImVec2(ImGui::GetWindowWidth()-20, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), false, ImGuiWindowFlags_NoBackground);
                 logFile = ReadFileToString();
                 ImGui::TextWrapped("%s", logFile.c_str());
                 ImGui::EndChild();
@@ -1848,10 +1838,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
             case SETTINGS_TAB:
                 ImGui::SetCursorPosX(20.0f);
+                ImGui::SetCursorPosY(0.0f);
+                ImGui::BeginChild("Settings Tab", ImVec2(0, ImGui::GetWindowHeight()), true, ImGuiWindowFlags_NoBackground);
                 ImGui::SetCursorPosY(20.0f);
-                ImGui::BeginChild("Settings", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), true, ImGuiWindowFlags_NoBackground);
                 if (imgbg) { 
-                    ImGui::Text("Change background imAage:");
+                    ImGui::Text("Change background image:");
                     if (budgetfm) {
                         ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
                         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
@@ -1910,7 +1901,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::InputInt("Silence threshold", (int*)&sthreshold);
                 ImGui::InputInt("Silence timeout", (int*)&stimeout);
                 ImGui::SeparatorText("advanced parameters");
-                ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
+                ImGui::Text("Do not change - unless you know, what you're doing."); ImGui::Spacing();
                 ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
                 ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
                 ImGui::SeparatorText("");
@@ -1992,9 +1983,15 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                         Logger::GetInstance().log("[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?\n");
                     }
                 }
-                ImGui::Spacing();
+                ImGui::Dummy(ImVec2(0.0f,10.0f));
                 ImGui::EndChild();
 
+            break;
+
+            case DEBUG_TAB:
+                ImGui::SetNextWindowPos(ImVec2(fb_width/2.0f+20.0f, 64.0f));
+                ImGui::SetNextWindowSize(ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()));
+                ImGui::ShowDebugLogWindow();
             break;
 
             default:
@@ -2043,14 +2040,29 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             if (ImGui::Button("#", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=OVERVIEW_TAB;
         }
         ImGui::PopFont();
-        
+
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(100.0f);
         ImGui::PushFont(f_iconData);  
         if (open&&sidebar_size<=-70) { 
             ImGui::PopFont(); 
-            if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; 
+            if (ImGui::Button("Manual Input", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=MANUAL_INPUT_TAB; 
             ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(102.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("");
+        }
+        else {
+            if (ImGui::Button("", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=MANUAL_INPUT_TAB;
+        }
+        ImGui::PopFont();
+        
+        ImGui::SetCursorPosX(9.0f);
+        ImGui::SetCursorPosY(140.0f);
+        ImGui::PushFont(f_iconData);  
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(142.0f);
             ImGui::PushFont(f_iconData); 
             ImGui::Text("(");
         }
@@ -2060,17 +2072,51 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PopFont();
         
         ImGui::SetCursorPosX(9.0f);
-        ImGui::SetCursorPosY(140.0f);
+        ImGui::SetCursorPosY(180.0f);
         ImGui::PushFont(f_iconData);  
         if (open&&sidebar_size<=-70) { 
             ImGui::PopFont(); 
             if (ImGui::Button("Settings", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=SETTINGS_TAB; 
-            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(142.0f);
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(182.0f);
             ImGui::PushFont(f_iconData); 
             ImGui::Text("~");
         }
         else {
             if (ImGui::Button("~", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=SETTINGS_TAB;
+        }
+        ImGui::PopFont();
+        
+        ImGui::SetCursorPosX(9.0f);
+        ImGui::SetCursorPosY(220.0f);
+        ImGui::PushFont(f_iconData);  
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont(); 
+            if (ImGui::Button("ImGui Debug", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=DEBUG_TAB; 
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(222.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("");
+        }
+        else {
+            if (ImGui::Button("", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) c_tab=DEBUG_TAB;
+        }
+        ImGui::PopFont();
+        
+        ImGui::SetCursorPosX(9.0f);
+        ImGui::SetCursorPosY(260.0f);
+        ImGui::PushFont(f_iconData);  
+        if (open&&sidebar_size<=-70) { 
+            ImGui::PopFont();
+            if (stats) {
+                if (ImGui::Button("Hide FPS", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) stats=false; 
+            } else {
+                if (ImGui::Button("Show FPS", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) stats=true; 
+            }
+            ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(262.0f);
+            ImGui::PushFont(f_iconData); 
+            ImGui::Text("");
+        }
+        else {
+            if (ImGui::Button("", ImVec2(std::abs(sidebar_size)/1.72f, 34.0f))) stats=!stats;
         }
         ImGui::PopFont();
 
@@ -2079,171 +2125,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
         ImGui::End();
 
-        if (settings) {
-            ImGui::Begin("Settings", &settings);
-            ImGui::SeparatorText("dashboard customization");
-
-            if (imgbg) { 
-                ImGui::Text("Change background imAage:");
-                if (budgetfm) {
-                    ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
-                    ImGui::Button("Select new background");
-                    ImGui::PopItemFlag();
-                    ImGui::PopStyleVar();
-                    if (picker.Draw("pick an image", &budgetfm, &out_path)) {
-                        printf("[INFO] Selected new background: %s\n[INFO] Replacing the current image...\n", out_path.c_str());
-                            if (CopyFile(out_path,image_path)) {
-                                RemoveTexture(&texture);
-                                ret = LoadTextureFromFile(image_path, &texture);
-                                IM_ASSERT(ret);
-                                std::cout << "[INFO] Applied new image successfully!" << std::endl;
-                                bgsuccess = 's'; // set
-                            } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = 'f'; } // fail
-                        budgetfm = false;
-                    }
-                }
-                else {
-                    if (ImGui::Button("Select new background"))
-                        budgetfm = true;
-                    if (bgsuccess == 's') {
-                        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(18,192,18,255));
-                        ImGui::Text("Successfully updated the background!");
-                        ImGui::PopStyleColor();
-                    } else if (bgsuccess == 'f') {
-                        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(242,37,85,255));
-                        ImGui::Text("Failed to update the background!");
-                        ImGui::PopStyleColor();                        
-                    }
-                }
-
-
-              } 
-            else {
-                ImGui::Text("Change background color:");
-                ImGui::ColorEdit3("", (float*)&backgorund_color);
-            }
-            ImGui::Spacing();
-            ImGui::Text("Change theme color:");
-            ImGui::ColorEdit3("", (float*)&theme_color); ImGui::Spacing();
-            ImGui::Text("Add custom fonts:");
-            ImGui::InputText("Font (.ttf) path", const_cast<char*>(fontdir.c_str()), fontdir.capacity()+1, flags, ResizeCallback, (void*)&fontdir); ImGui::Spacing();
-            ImGui::InputInt("Font size", (int*)&fontsize);
-            ImGui::SeparatorText("text-to-speech");
-            ImGui::Text("Voicebank");
-            ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank); ImGui::Spacing();
-            ImGui::Text("Voice variables");
-            ImGui::InputInt("Speech rate", (int*)&sr);
-            ImGui::InputInt("Speech pitch", (int*)&sp);
-            ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
-            ImGui::SeparatorText("speech-to-text");
-            ImGui::Text("Vosk-API model");
-            ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi); ImGui::Spacing();
-            ImGui::Text("Detection values");
-            ImGui::InputInt("Silence threshold", (int*)&sthreshold);
-            ImGui::InputInt("Silence timeout", (int*)&stimeout);
-            ImGui::SeparatorText("advanced parameters");
-            ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
-            ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
-            ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
-            ImGui::SeparatorText("");
-            if (ImGui::Button("Save")) {
-                std::cout << "[INFO] Saving settings..." << std::endl;
-                Logger::GetInstance().log("[INFO] Saving settings...");
-                ImVec4ToFloats({r,g,b,0});
-                if (!imgbg) {
-                    try {
-                        cfg.set<int>("ui_bgc_red", r*255);
-                        cfg.set<int>("ui_bgc_green", g*255);
-                        cfg.set<int>("ui_bgc_blue", b*255);
-                        std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Background color updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update background color configuration! Skipping...\n");
-                    }
-
-                } 
-                else { 
-                    std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; 
-                    Logger::GetInstance().log("[INFO] Skipping background color saving due to background image being active.\n"); 
-                }
-                ImVec4ToFloats({tcr,tcg,tcb,0});
-                try {
-                    cfg.set<int>("ui_theme_red", tcr*255); // TODO: fix values not updating
-                    cfg.set<int>("ui_theme_green", tcg*255);
-                    cfg.set<int>("ui_theme_blue", tcb*255);
-                    std::cout << "[INFO] Theme color updated successfully!" << std::endl;
-                    Logger::GetInstance().log("[INFO] Theme color updated successfully!\n");
-
-                } 
-                catch (...) {   
-                    std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; 
-                    Logger::GetInstance().log("[ERROR] Unable to update theme color configuration! Skipping...\n");
-                }
-                try {
-                    cfg.set<int>("speech_rate", sr);
-                    cfg.set<int>("speech_pitch", sp);
-                    cfg.set<int>("speech_volume", sv);
-                    cfg.set<std::string>("speech_vociebank", voicebank);
-                    std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
-                    Logger::GetInstance().log("[INFO] Text-to-speech configuration updated successfully!\n");
-                } 
-                catch (...) {   
-                    std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; 
-                    Logger::GetInstance().log("[ERROR] Unable to update text-to-speech configuration! Skipping...\n"); 
-                }
-                try {
-                    cfg.set<int>("silence_threshold", sthreshold);
-                    cfg.set<int>("silence_timeout", stimeout);
-                    cfg.set<std::string>("voskapi_model_path", voskapi);
-                    std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
-                    Logger::GetInstance().log("[INFO] Speech-to-text configuration updated successfully!\n");
-                } 
-                catch (...) {   
-                    std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; 
-                    Logger::GetInstance().log("[ERROR] Unable to update speech-to-text configuration! Skipping...\n");
-                }
-                try {
-                    cfg.set<int>("pa_sample_spec_rate", pasamplerate);
-                    cfg.set<int>("buffer_factor", bufferfactor);
-                    std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
-                    Logger::GetInstance().log("[INFO] Advanced settings updated successfully!\n");
-                } 
-                catch (...) {   
-                    std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; 
-                    Logger::GetInstance().log("[ERROR] Unable to update advanced settings! Skipping...\n");
-                }
-
-                if (cfg.SaveToFile(config_path)) {
-                    std::cout << "[INFO] Successfully applied all settings!" << std::endl;
-                    Logger::GetInstance().log("[INFO] Successfully applied all settings!\n");
-                } 
-                else { 
-                    std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?" << std::endl; 
-                    Logger::GetInstance().log("[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?\n");
-                }
-            } ImGui::SameLine();
-            if (ImGui::Button("Close"))
-                settings = false;
-            ImGui::End();
-    }
-    if (imgui_debug) {
-        ImGui::ShowDebugLogWindow();
-    }
-    if (debug_log) {
-        ImGui::SetNextWindowPos(ImVec2(0, fb_height-200), ImGuiCond_Once);
-        ImGui::SetNextWindowSize(ImVec2(fb_width,0), ImGuiCond_Always);
-        ImGui::Begin("konamask log", &debug_log, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove);
-
-        logFile = ReadFileToString();
-
-        ImGui::Separator();
-        ImGui::TextWrapped("%s", logFile.c_str());
-
-        ImGui::End();
-    }
     if (imgbg) {
         // remove padding
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -2251,7 +2132,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(fb_width,fb_height), ImGuiCond_Always);
         
-            ImGui::Begin("background", nullptr,
+            ImGui::Begin("##background", nullptr,
                          ImGuiWindowFlags_NoMove |
                          ImGuiWindowFlags_NoTitleBar |
                          ImGuiWindowFlags_NoBringToFrontOnFocus |
@@ -2283,7 +2164,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
         
-            ImGui::Begin("statistics", nullptr,
+            ImGui::Begin("##statistics", nullptr,
                          ImGuiWindowFlags_NoMove |
                          ImGuiWindowFlags_NoTitleBar |
                          ImGuiWindowFlags_NoCollapse |
@@ -2299,239 +2180,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PopStyleColor();
     }
 
-
-
-            if (settings) {
-                ImGui::Begin("Settings", &settings);
-                ImGui::SeparatorText("dashboard customization");
-
-                if (imgbg) { 
-                    ImGui::Text("Change background imAage:");
-                    if (budgetfm) {
-                        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-                        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
-                        ImGui::Button("Select new background");
-                        ImGui::PopItemFlag();
-                        ImGui::PopStyleVar();
-                        if (picker.Draw("pick an image", &budgetfm, &out_path)) {
-                            printf("[INFO] Selected new background: %s\n[INFO] Replacing the current image...\n", out_path.c_str());
-                                if (CopyFile(out_path,image_path)) {
-                                    RemoveTexture(&texture);
-                                    ret = LoadTextureFromFile(image_path, &texture);
-                                    IM_ASSERT(ret);
-                                    std::cout << "[INFO] Applied new image successfully!" << std::endl;
-                                    bgsuccess = 's'; // set
-                                } else { std::cout << "[ERROR] Could not update the background image!" << std::endl; bgsuccess = 'f'; } // fail
-                            budgetfm = false;
-                        }
-                    }
-                    else {
-                        if (ImGui::Button("Select new background"))
-                            budgetfm = true;
-                        if (bgsuccess == 's') {
-                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(18,192,18,255));
-                            ImGui::Text("Successfully updated the background!");
-                            ImGui::PopStyleColor();
-                        } else if (bgsuccess == 'f') {
-                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(242,37,85,255));
-                            ImGui::Text("Failed to update the background!");
-                            ImGui::PopStyleColor();                        
-                        }
-                    }
-
-
-                } 
-                else {
-                    ImGui::Text("Change background color:");
-                    ImGui::ColorEdit3("", (float*)&backgorund_color);
-                }
-                ImGui::Spacing();
-                ImGui::Text("Change theme color:");
-                ImGui::ColorEdit3("", (float*)&theme_color); ImGui::Spacing();
-                ImGui::Text("Add custom fonts:");
-                ImGui::InputText("Font (.ttf) path", const_cast<char*>(fontdir.c_str()), fontdir.capacity()+1, flags, ResizeCallback, (void*)&fontdir); ImGui::Spacing();
-                ImGui::InputInt("Font size", (int*)&fontsize);
-                ImGui::SeparatorText("text-to-speech");
-                ImGui::Text("Voicebank");
-                ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank); ImGui::Spacing();
-                ImGui::Text("Voice variables");
-                ImGui::InputInt("Speech rate", (int*)&sr);
-                ImGui::InputInt("Speech pitch", (int*)&sp);
-                ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
-                ImGui::SeparatorText("speech-to-text");
-                ImGui::Text("Vosk-API model");
-                ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi); ImGui::Spacing();
-                ImGui::Text("Detection values");
-                ImGui::InputInt("Silence threshold", (int*)&sthreshold);
-                ImGui::InputInt("Silence timeout", (int*)&stimeout);
-                ImGui::SeparatorText("advanced parameters");
-                ImGui::Text("Do not change, unless you know, what you're doing."); ImGui::Spacing();
-                ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
-                ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
-                ImGui::SeparatorText("");
-                if (ImGui::Button("Save")) {
-                    std::cout << "[INFO] Saving settings..." << std::endl;
-                    Logger::GetInstance().log("[INFO] Saving settings...");
-                    ImVec4ToFloats({r,g,b,0});
-                    if (!imgbg) {
-                        try {
-                            cfg.set<int>("ui_bgc_red", r*255);
-                            cfg.set<int>("ui_bgc_green", g*255);
-                            cfg.set<int>("ui_bgc_blue", b*255);
-                            std::cout << "[INFO] Background color updated successfully!" << std::endl;
-                            Logger::GetInstance().log("[INFO] Background color updated successfully!\n");
-                        } 
-                        catch (...) {   
-                            std::cout << "[ERROR] Unable to update background color configuration! Skipping..." << std::endl; 
-                            Logger::GetInstance().log("[ERROR] Unable to update background color configuration! Skipping...\n");
-                        }
-                        
-                    } 
-                    else { 
-                        std::cout << "[INFO] Skipping background color saving due to background image being active." << std::endl; 
-                        Logger::GetInstance().log("[INFO] Skipping background color saving due to background image being active.\n"); 
-                    }
-                    ImVec4ToFloats({tcr,tcg,tcb,0});
-                    try {
-                        cfg.set<int>("ui_theme_red", tcr*255); // TODO: fix values not updating
-                        cfg.set<int>("ui_theme_green", tcg*255);
-                        cfg.set<int>("ui_theme_blue", tcb*255);
-                        std::cout << "[INFO] Theme color updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Theme color updated successfully!\n");
-                        
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update theme color configuration! Skipping...\n");
-                    }
-                    try {
-                        cfg.set<int>("speech_rate", sr);
-                        cfg.set<int>("speech_pitch", sp);
-                        cfg.set<int>("speech_volume", sv);
-                        cfg.set<std::string>("speech_vociebank", voicebank);
-                        std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Text-to-speech configuration updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update text-to-speech configuration! Skipping...\n"); 
-                    }
-                    try {
-                        cfg.set<int>("silence_threshold", sthreshold);
-                        cfg.set<int>("silence_timeout", stimeout);
-                        cfg.set<std::string>("voskapi_model_path", voskapi);
-                        std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Speech-to-text configuration updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update speech-to-text configuration! Skipping...\n");
-                    }
-                    try {
-                        cfg.set<int>("pa_sample_spec_rate", pasamplerate);
-                        cfg.set<int>("buffer_factor", bufferfactor);
-                        std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Advanced settings updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update advanced settings! Skipping...\n");
-                    }
-                    
-                    if (cfg.SaveToFile(config_path)) {
-                        std::cout << "[INFO] Successfully applied all settings!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Successfully applied all settings!\n");
-                    } 
-                    else { 
-                        std::cout << "[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?" << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to save settings: an unexpected exception occured! - Is the file in use of another proces?\n");
-                    }
-                } ImGui::SameLine();
-                if (ImGui::Button("Close"))
-                    settings = false;
-                ImGui::End();
-        }
-        if (manual) {
-            ImGui::Begin("Manual voice output", &manual);
-            ImGui::Text("Manual voice output:");
-            ImGui::InputText("Limit: 128 characters", (char*)&manInput, IM_ARRAYSIZE(manInput));
-            if (ImGui::Button("Speak through the microphone")) {
-                TextToSpeech::Verbalize((char*)&manInput);
-            }
-            ImGui::Spacing();
-            if (ImGui::Button("Close"))
-                manual = false;
-            ImGui::End();
-        }
-        if (imgui_debug) {
-            ImGui::ShowDebugLogWindow();
-        }
-        if (debug_log) {
-            ImGui::Begin("konamask log");
-
-            logFile = ReadFileToString();
-        
-            ImGui::Separator();
-            ImGui::TextWrapped("%s", logFile.c_str());
-        
-            ImGui::End();
-        }
-        if (imgbg) {
-            // remove padding
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            {
-                ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
-            
-                ImGui::Begin("background", nullptr,
-                             ImGuiWindowFlags_NoMove |
-                             ImGuiWindowFlags_NoTitleBar |
-                             ImGuiWindowFlags_NoBringToFrontOnFocus |
-                             ImGuiWindowFlags_NoInputs |
-                             ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_NoResize |
-                             ImGuiWindowFlags_NoScrollbar |
-                             ImGuiWindowFlags_NoBackground);
-                
-                
-                ImGui::Image(
-                    (ImTextureID)texture.DS, 
-                    ImVec2(fb_width, fb_height), 
-                
-                    ImVec2(ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)), 
-                    ImVec2(ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f) - fb_width) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.width > 0) ? (float)texture.width : 1.0f))), 0.0f, 1.0f), ImClamp(1.0f - ((std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f) - fb_height) / (2.0f * std::max(fb_width/((texture.width > 0) ? (float)texture.width : 1.0f), fb_height/((texture.height > 0) ? (float)texture.height : 1.0f))*((texture.height > 0) ? (float)texture.height : 1.0f))), 0.0f, 1.0f)));
-                
-                
-                
-                ImGui::End();
-            }
-            ImGui::PopStyleVar();
-        }
-        if (stats) {
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
-            {
-                ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
-            
-                ImGui::Begin("statistics", nullptr,
-                             ImGuiWindowFlags_NoMove |
-                             ImGuiWindowFlags_NoTitleBar |
-                             ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_NoResize |
-                             ImGuiWindowFlags_NoScrollbar |
-                             ImGuiWindowFlags_NoBackground);
-                ImGui::GetForegroundDrawList();
-                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-
-                ImGui::End();
-            }
-            ImGui::PopStyleVar();
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor();
-        }
-        
         // rendering
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();

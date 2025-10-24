@@ -365,52 +365,38 @@ static bool device_supports_format(PaDeviceIndex dev, double sampleRate, PaSampl
 }
 
 int SpeechToText::Run() {
-    std::cout << "[INFO] Listening..." << std::endl;
+    std::cout << "[INFO] Listening...\n";
     Logger::GetInstance().log("[INFO] Listening...\n");
 
-    std::vector<int16_t> buffer(framesPerBuffer);
+    std::vector<int16_t> buffer; // will be filled by dm.readAndProcess
     bool inSpeech = false;
     bool silenceTimerRunning = false;
     auto silenceStart = std::chrono::steady_clock::now();
-    
-    // diagnostics counters
+
     size_t frames_with_nonzero = 0;
     size_t frames_read = 0;
 
-    // listen and process
     while (true) {
-        // PaError err = Pa_ReadStream(stream, buffer.data(), framesPerBuffer);
-        // if (err == paInputOverflowed) {
-        //     // input overflow — not fatal, log and continue
-        //     std::cerr << "[WARN] Pa_ReadStream: input overflow\n";
-        //     // optionally zero-fill buffer so we don't feed garbage
-        //     std::fill(buffer.begin(), buffer.end(), 0);
-        // } else if (err == paNoError) {
-        //     // good
-        // } else {
-        //     // fatal/unknown error - print and break
-        //     std::cerr << "[ERROR] Pa_ReadStream failed: " << Pa_GetErrorText(err) << " (" << err << ")\n";
-        //     break;
-        // }
-            bool ok = dm.readAndProcess(visualizer, recognizer, framesPerBuffer);
-    if (!ok) {
-        dm.closeStream();
-        std::cerr << "[ERROR] stream read failed. re-enumerating devices.\n";
-        dm.enumerateDevices();
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        // read buffer (mono int16)
+        bool ok = dm.readAndProcess(buffer, visualizer, recognizer, framesPerBuffer);
+        if (!ok) {
+            std::cerr << "[ERROR] stream read failed. re-enumerating devices.\n";
+            dm.closeStream();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            dm.enumerateDevices();
+            PaDeviceIndex fallback = dm.pickDefault();
+            if (fallback != paNoDevice) dm.openStream(fallback, framesPerBuffer, sampleRate);
+            continue;
+        }
 
-        // try reopen default
-        PaDeviceIndex fallback = dm.pickDefault();
-        if (fallback != paNoDevice) dm.openStream(fallback, framesPerBuffer, sampleRate);
-        continue;
-    }
-
+        // compute amplitude on the filled buffer
         int maxAmp = 0;
         for (auto s : buffer) {
             int v = std::abs(static_cast<int>(s));
             if (v > maxAmp) maxAmp = v;
         }
         if (maxAmp > 0) frames_with_nonzero++;
+        frames_read++;
 
         // voice activity detection
         if (maxAmp > SILENCE_THRESHOLD) {
@@ -437,23 +423,17 @@ int SpeechToText::Run() {
             }
         }
 
-        PaError accErr = vosk_recognizer_accept_waveform(recognizer,
-            reinterpret_cast<const char *>(buffer.data()),
-            static_cast<int>(framesPerBuffer * sizeof(int16_t)));
-            
-        visualizer.PushSamples(buffer.data(), buffer.size());
-
-        frames_read++;
-        
+        // health check
+        if (frames_read == 200 && frames_with_nonzero == 0) {
+            std::cerr << "[ERROR] no non-zero samples captured in first ~" << (200 * framesPerBuffer) << " frames. check mic, routing, mute.\n";
+        }
     }
 
-
     // cleanup
-    Pa_StopStream(stream);
-    Pa_CloseStream(stream);
+    dm.closeStream();
     Pa_Terminate();
     vosk_recognizer_free(recognizer);
     vosk_model_free(model);
-
     return 0;
 }
+

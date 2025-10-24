@@ -35,7 +35,7 @@ Settings& cfg = Settings::GetInstance();
     int pa_error;
     pa = pa_simple_new(
         nullptr,                             // server (NULL = default)
-        "konamask Virtual Micropone",          // client name
+        "konamask-virtual-microphone",          // client name
         PA_STREAM_PLAYBACK,
         "VirtualSink",                          // sink name
         "konamask routed TTS voice",    // stream description

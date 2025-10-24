@@ -2,6 +2,7 @@
 
 #include "Interface.h"
 #include "TextToSpeech.h" // for manual voice output
+#include "SpeechToText.h" // for capturing voice input
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -225,6 +226,270 @@ private:
     }
 };
 
+// audio input stream
+InputVisualizer::InputVisualizer()
+    : ringMask(0),
+      writeIndex(0),
+      readIndex(0),
+      sr(0),
+      N(0),
+      halfN(0),
+      gain(1.0f),
+      smoothingAlpha(0.6f),
+      peakDecayPerSec(12.0f), // dB per second
+      minDb(-90.0f),
+      maxDb(0.0f) {
+}
+
+InputVisualizer::~InputVisualizer() {}
+
+bool InputVisualizer::Initialize(int sampleRate, int fftSize, int ringBufferSeconds) {
+    if (fftSize <= 0) return false;
+    // power of two
+    int p2 = 1;
+    while (p2 < fftSize) p2 <<= 1;
+    N = p2;
+    sr = sampleRate;
+    halfN = N / 2;
+
+    // prepare buffers
+    fft_re.assign(N, 0.0);
+    fft_im.assign(N, 0.0);
+    tmp_re.assign(N, 0.0);
+    tmp_im.assign(N, 0.0);
+
+    spectrum.assign(halfN, 0.0f);
+    spectrumSmoothed.assign(halfN, 0.0f);
+    peakHold.assign(halfN, minDb);
+    waveform.assign(N, 0.0f);
+    win.assign(N, 1.0);
+    for (int i = 0; i < N; ++i) win[i] = hannWindow(i, N);
+
+    prepareTwiddles();
+
+    // ring buffer size = next power-of-two of (sr * seconds)
+    size_t ringSamples = 1;
+    size_t desired = static_cast<size_t>(sr) * std::max(1, ringBufferSeconds);
+    while (ringSamples < desired) ringSamples <<= 1;
+    ring.resize(ringSamples);
+    ringMask = ringSamples - 1;
+    writeIndex.store(0);
+    readIndex.store(0);
+
+    lastPeakDecay = std::chrono::steady_clock::now();
+
+    return true;
+}
+
+void InputVisualizer::prepareTwiddles() {
+    // precompute
+    tw_re.resize(N/2);
+    tw_im.resize(N/2);
+    for (int k = 0; k < N/2; ++k) {
+        double angle = -2.0 * M_PI * k / N;
+        tw_re[k] = std::cos(angle);
+        tw_im[k] = std::sin(angle);
+    }
+}
+
+void InputVisualizer::inplaceFFT(std::vector<double>& re, std::vector<double>& im) {
+    int n = N;
+    // bit-reversal permutation
+    int j = 0;
+    for (int i = 1; i < n - 1; ++i) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            std::swap(re[i], re[j]);
+            std::swap(im[i], im[j]);
+        }
+    }
+    // fft
+    for (int len = 2; len <= n; len <<= 1) {
+        int half = len >> 1;
+        int step = n / len;
+        for (int i = 0; i < n; i += len) {
+            for (int k = 0; k < half; ++k) {
+                int twiddleIndex = k * step;
+                double tre = tw_re[twiddleIndex] * re[i + k + half] - tw_im[twiddleIndex] * im[i + k + half];
+                double tim = tw_re[twiddleIndex] * im[i + k + half] + tw_im[twiddleIndex] * re[i + k + half];
+                double ur = re[i + k];
+                double ui = im[i + k];
+                re[i + k] = ur + tre;
+                im[i + k] = ui + tim;
+                re[i + k + half] = ur - tre;
+                im[i + k + half] = ui - tim;
+            }
+        }
+    }
+}
+
+inline void InputVisualizer::writeRing(const int16_t* src, size_t n) {
+    // write # samples to ring buffer - writer is single-threaded (audio thread)
+    uint64_t w = writeIndex.load(std::memory_order_relaxed);
+    size_t pos = static_cast<size_t>(w & ringMask);
+    size_t remain = n;
+    while (remain > 0) {
+        size_t chunk = std::min(remain, ring.size() - pos);
+        std::memcpy(&ring[pos], src + (n - remain), chunk * sizeof(int16_t));
+        pos = (pos + chunk) & ringMask;
+        remain -= chunk;
+    }
+    // update write index once at end
+    writeIndex.store(w + n, std::memory_order_release);
+    // if writer outruns reader, advance reader (drop oldest)
+    uint64_t r = readIndex.load(std::memory_order_relaxed);
+    if ((w + n) - r > ring.size()) {
+        // drop oldest frames
+        readIndex.store((w + n) - ring.size(), std::memory_order_relaxed);
+    }
+}
+
+inline size_t InputVisualizer::availableSamples() const {
+    uint64_t w = writeIndex.load(std::memory_order_acquire);
+    uint64_t r = readIndex.load(std::memory_order_acquire);
+    if (w <= r) return 0;
+    uint64_t avail = w - r;
+    if (avail > ring.size()) avail = ring.size();
+    return static_cast<size_t>(avail);
+}
+
+inline void InputVisualizer::readFromRing(int16_t* dst, size_t n) {
+    // read # samples from ring buffer
+    uint64_t r = readIndex.load(std::memory_order_relaxed);
+    size_t pos = static_cast<size_t>(r & ringMask);
+    size_t remain = n;
+    while (remain > 0) {
+        size_t chunk = std::min(remain, ring.size() - pos);
+        std::memcpy(dst + (n - remain), &ring[pos], chunk * sizeof(int16_t));
+        pos = (pos + chunk) & ringMask;
+        remain -= chunk;
+    }
+    readIndex.store(r + n, std::memory_order_release);
+}
+
+void InputVisualizer::PushSamples(const int16_t* samples, size_t count) {
+    if (!ring.empty() && count > 0) writeRing(samples, count);
+}
+
+void InputVisualizer::Process() {
+    // if not enough samples for an fft, try to read # samples
+    size_t avail = availableSamples();
+    if (avail < static_cast<size_t>(N)) {
+        // not enough, but still read partial wave for waveform rendering
+        size_t toRead = std::min(avail, static_cast<size_t>(N));
+        if (toRead == 0) return;
+        std::vector<int16_t> scratch(toRead);
+        readFromRing(scratch.data(), toRead);
+        // fill waveform with newest samples aligned to end
+        int pad = N - static_cast<int>(toRead);
+        for (int i = 0; i < pad; ++i) waveform[i] = 0.0f;
+        for (size_t i = 0; i < toRead; ++i) waveform[pad + i] = static_cast<float>(scratch[i]) / 32768.0f * gain;
+        // not enough for fft, keep previous spectrum with slight decay
+        float decayFactor = 1.0f - (1.0f - smoothingAlpha) * 0.5f;
+        for (int i = 0; i < halfN; ++i) spectrumSmoothed[i] *= decayFactor;
+        return;
+    }
+
+    // read exactly # samples for fft
+    std::vector<int16_t> samples(N);
+    readFromRing(samples.data(), N);
+
+    // convert to double, apply window, and copy to fft arrays
+    for (int i = 0; i < N; ++i) {
+        double v = static_cast<double>(samples[i]) / 32768.0;
+        v *= static_cast<double>(gain);
+        tmp_re[i] = v * win[i];
+        tmp_im[i] = 0.0;
+        waveform[i] = static_cast<float>(v); // store raw waveform (no window) for display
+    }
+
+    // compute FFT in-place on tmp arrays
+    std::copy(tmp_re.begin(), tmp_re.end(), fft_re.begin());
+    std::fill(fft_im.begin(), fft_im.end(), 0.0);
+    inplaceFFT(fft_re, fft_im);
+
+    // magnitude for first half
+    // convert to dB and normalize (double) for display
+    const double eps = 1e-12;
+    for (int k = 0; k < halfN; ++k) {
+        double re = fft_re[k];
+        double im = fft_im[k];
+        double mag = std::sqrt(re*re + im*im) / (double)N; // scale by #
+        double db = 20.0 * std::log10(mag + eps); // dBFS
+        // clamp
+        if (db < minDb) db = minDb;
+        if (db > maxDb) db = maxDb;
+        // normalize
+        float norm = static_cast<float>((db - minDb) / (maxDb - minDb));
+        // smoothing
+        spectrumSmoothed[k] = smoothingAlpha * spectrumSmoothed[k] + (1.0f - smoothingAlpha) * norm;
+        // peak hold update (in db space)
+        float peak = peakHold[k];
+        float dbf = static_cast<float>(db);
+        if (dbf > peak) peakHold[k] = dbf;
+        spectrum[k] = norm;
+    }
+
+    // peak decay based on elapsed time
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - lastPeakDecay).count();
+    lastPeakDecay = now;
+    float decayAmount = static_cast<float>(peakDecayPerSec * elapsed);
+    for (int k = 0; k < halfN; ++k) {
+        peakHold[k] -= decayAmount;
+        if (peakHold[k] < minDb) peakHold[k] = minDb;
+    }
+}
+
+void InputVisualizer::render() {
+    // frequency spectrum
+    ImGui::Text("spectrum (frequency)");
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), 160.0f);
+        ImGui::InvisibleButton("spec_canvas", sz);
+        dl->AddRect(p, ImVec2(p.x + sz.x, p.y + sz.y), IM_COL32(100,100,100,255));
+
+        int bins = static_cast<int>(spectrumSmoothed.size());
+        float barW = sz.x / (float)bins;
+        for (int i = 0; i < bins; ++i) {
+            float x0 = p.x + i * barW;
+            float x1 = x0 + barW * 0.9f;
+            float v = spectrumSmoothed[i];
+            float y = p.y + sz.y * (1.0f - v);
+            // draw bar
+            dl->AddRectFilled(ImVec2(x0, y), ImVec2(x1, p.y + sz.y), IM_COL32(80,160,220,200));
+            // draw peak line in different color
+            float peakNorm = (peakHold[i] - minDb) / (maxDb - minDb);
+            if (peakNorm < 0.0f) peakNorm = 0.0f;
+            if (peakNorm > 1.0f) peakNorm = 1.0f;
+            float py = p.y + sz.y * (1.0f - peakNorm);
+            dl->AddLine(ImVec2(x0, py), ImVec2(x1, py), IM_COL32(255,140,80,220), 1.0f);
+        }
+        ImGui::Dummy(sz);
+    }
+    // controls
+    ImGui::PushItemWidth(-1);
+    ImGui::SliderFloat("##gain", &gain, 0.0f, 10.0f, "Gain = %.2f");
+    ImGui::SliderFloat("##smoothing", &smoothingAlpha, 0.0f, 0.999f, "Smoothing = %.3f");
+    ImGui::SliderFloat("##peak_decay", &peakDecayPerSec, 0.0f, 60.0f, "Decay = %.1f dB/s");
+    ImGui::PopItemWidth();
+
+    // waveform
+    ImGui::Text("waveform (time domain)");
+    {
+        ImGui::PlotLines("##plot_lines", waveform.data(), waveform.size(), 0, nullptr, -1.0f, 1.0f, ImVec2(0, 80));
+    }
+
+
+    // simple frequency readout under cursor
+    // ImGui::Text("notes: fft size %d, sr %d, bin width %.2f Hz", N, sr, sr / (float)N);
+}
+
+static InputVisualizer g_InputVis;
 
 
 static void check_vk_result(VkResult err) {
@@ -1166,6 +1431,45 @@ std::string Interface::ReadFileToString() {
     return buffer.str();
 }
 
+std::future<bool> Interface::prompt_user_async(std::string context) {
+    auto p = std::make_unique<prompt>(PromptType::boolean, std::move(context));
+    std::future<bool> f = p->promise_bool.get_future();
+    {
+        // push into queue
+        std::lock_guard<std::mutex> lk(prompt_mutex_);
+        prompt_queue_.push_back(std::move(p));
+    }
+    return f;
+}
+
+std::future<std::string> Interface::prompt_user_async_string(std::string context) {
+    auto p = std::make_unique<prompt>(PromptType::string, std::move(context), /*buf_size=*/1024);
+    std::future<std::string> f = p->promise_str.get_future();
+    {
+        std::lock_guard<std::mutex> lk(prompt_mutex_);
+        prompt_queue_.push_back(std::move(p));
+    }
+    return f;
+}
+
+bool Interface::render_prompt() {
+    // {
+    {
+        std::lock_guard<std::mutex> lk(prompt_mutex_);
+        if (!active_prompt_ && !prompt_queue_.empty()) {
+            // move the front prompt into active_prompt_
+            active_prompt_ = std::move(prompt_queue_.front());
+            prompt_queue_.pop_front();
+            
+            // ImGui::OpenPopup("Prompt##Interface");
+        }
+    }
+
+    if (!active_prompt_) return false;
+    else return true;
+    
+} 
+
 int Interface::Render(std::atomic<bool>* runningFlag) {
     // configuration path
     char config_path[PATH_MAX];
@@ -1580,7 +1884,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             } else {
                 io.Fonts->AddFontFromMemoryTTF(dmsans_semibold, sizeof(dmsans_semibold), cfg.get<int>("ui_font_size", 24) * main_scale, &f_cfg);
                 // io.Fonts->AddFontDefault();
-                Logger::GetInstance().log("[ERROR] Custom font file (\""+cfg.get<std::string>("ui_custom_font", "")+"\") does not exist, using default!");
+                Logger::GetInstance().log("[ERROR] Custom font file (\""+cfg.get<std::string>("ui_custom_font", "")+"\") does not exist, using default!\n");
             }
         }
         else {
@@ -1626,7 +1930,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     fontdir.resize(fontdir.size());
     int fontsize = cfg.get<int>("ui_font_size", 14);
     
-
     // rendering variables
     bool budgetfm = false;    
     char bgsuccess = 'u'; // unset
@@ -1669,7 +1972,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         enum Tabs c_tab = OVERVIEW_TAB;
         bool open = false;
         short sidebar_size = -64;
-
 
     ImGuiFilePicker picker;
     std::string out_path;
@@ -1762,13 +2064,16 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         // contacts column
         ImGui::BeginChild("Controls", ImVec2(fb_width/2.0, 0), true);
         
-        ImGui::BeginGroup();
-        ImGui::SetCursorPosY(20.0f);
+        // ImGui::BeginGroup();
+        // ImGui::SetCursorPosY(20.0f);
 
-        ImGui::TextUnformatted("Direct Messages");
-        ImGui::CalcTextSize("Direct Messages");
+        // ImGui::TextUnformatted("Direct Messages");
+        // ImGui::CalcTextSize("Direct Messages");
 
-        ImGui::EndGroup();
+        // ImGui::EndGroup();
+        g_InputVis.Process();
+        g_InputVis.render();
+
         ImGui::Separator();
 
         ImGui::EndChild();
@@ -1989,7 +2294,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             break;
 
             case DEBUG_TAB:
-                ImGui::SetNextWindowPos(ImVec2(fb_width/2.0f+20.0f, 64.0f));
+                ImGui::SetNextWindowPos(ImVec2(fb_width/2.0f+20.0f, 63.0f));
                 ImGui::SetNextWindowSize(ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()));
                 ImGui::ShowDebugLogWindow();
             break;
@@ -2006,7 +2311,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosX(9.0f);
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData);  
-        if (open&&sidebar_size<=-70) { 
+        if (open&&sidebar_size<=-70) {
             ImGui::PopFont(); 
             if (ImGui::Button("Sidebar", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) open=!open; 
             ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(12.0f);
@@ -2155,6 +2460,68 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::End();
         }
         ImGui::PopStyleVar();
+    }
+
+    if (render_prompt()) {
+
+        ImGui::SetNextWindowPos(ImVec2(fb_width/2.0-fb_width/8.0,fb_height/2.0-fb_height/8.0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(fb_width/4.0,fb_height/4.0), ImGuiCond_Always);
+        ImGui::Begin("prompt", nullptr,
+                     ImGuiWindowFlags_NoTitleBar |
+                     ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoScrollbar);
+
+        ImGui::SetCursorPosY(13.5f);
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth()/2-53);
+        ImGui::Text("ACTION REQUIRED");
+        ImGui::Separator();
+        ImGui::TextUnformatted(active_prompt_->context.c_str(), NULL);
+        // if (ImGui::Button("Terminate", ImVec2(100,28))) {
+        //     active_prompt_->promise.set_value(false);
+        //     active_prompt_.reset();
+        //     ImGui::CloseCurrentPopup();
+        // }
+        // ImGui::SameLine();
+        // ImGui::SetCursorPosY(ImGui::GetWindowHeight()-48);
+        // if (ImGui::Button("Accept", ImVec2(100,28))) {
+        //     // clear active prompt and perform callback
+        //     active_prompt_->promise.set_value(true);
+        //     active_prompt_.reset();
+        //     ImGui::CloseCurrentPopup();
+        // }
+        if (active_prompt_->type == PromptType::boolean) { // present true/false return to promise
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth()/2-106);
+            ImGui::SetCursorPosY(ImGui::GetWindowHeight()-48);
+            if (ImGui::Button("Terminate", ImVec2(100, 28))) {
+                active_prompt_->promise_bool.set_value(false);
+                active_prompt_.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Accept", ImVec2(100, 28))) {
+                active_prompt_->promise_bool.set_value(true);
+                active_prompt_.reset();
+                ImGui::CloseCurrentPopup();
+            }
+        } else { // present context return to promise (requires further processing)
+            ImGui::InputText("##prompt_input", active_prompt_->input_buf.data(), active_prompt_->input_buf.size());
+
+            ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 48);
+            if (ImGui::Button("Cancel", ImVec2(100, 28))) {
+                active_prompt_->promise_str.set_value(std::string());
+                active_prompt_.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Accept", ImVec2(100, 28))) {
+                std::string result = active_prompt_->input_buf.data();
+                active_prompt_->promise_str.set_value(std::move(result));
+                active_prompt_.reset();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::End();
     }
     if (stats) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));

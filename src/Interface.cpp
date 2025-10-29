@@ -1461,7 +1461,7 @@ bool Interface::render_prompt() {
             active_prompt_ = std::move(prompt_queue_.front());
             prompt_queue_.pop_front();
             
-            // ImGui::OpenPopup("Prompt##Interface");
+            ImGui::OpenPopup("Prompt##Interface");
         }
     }
 
@@ -2461,6 +2461,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         }
         ImGui::PopStyleVar();
     }
+
 
     if (render_prompt()) {
 

@@ -1,14 +1,57 @@
 #include "SpeechToText.h"
 #include "Interface.h"
 #include "Logger.h"
-#include <cstdint>
-#include <iostream>
+#include <vector>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 #include <thread>
+#include <atomic>
+#include <cmath>
+#include <future>
 #include <fstream>
-#include <vosk_api.h>
+#include <iostream>
+#include <cstring>
+#include <rtaudio/RtAudio.h>
 
 static InputVisualizer visualizer;
 static Interface ui;
+
+static bool ui_prompt(std::string output) {
+    Interface ui_;
+    auto fut = ui_.prompt_user_async(output);
+    bool accepted = fut.get(); // wait till callback
+    if (accepted) {
+        return true;
+    } else {
+        return false;
+    }
+
+// std::thread t([ui = &ui_, fe = fm_, output ]{ // bricks ui
+//     auto fut = ui->prompt_user_async(output);
+//     bool accepted = fut.get(); // blocks thread until UI responds
+//     if (accepted) {
+//         return true;
+//     } else {
+//         return false;
+//     }
+// });
+//     t.detach();
+    // return false;
+}
+
+static std::string ui_prompt_str(std::string output) {
+    Interface ui_;
+    auto fut = ui_.prompt_user_async_string(output);
+    return fut.get();
+    // std::string value = fut.get();
+    // if (value.empty()) {
+    //     return NULL;
+    // } else {
+    //     return value;
+    // }
+}
+
 
 struct PaDevInfo {
     int index;
@@ -18,539 +61,462 @@ struct PaDevInfo {
 };
 
 struct DeviceManager {
-    PaStream* stream = nullptr;
-    PaDeviceIndex currentDevice = paNoDevice;
-    PaSampleFormat activeFormat = paInt16;
+    // rtaudio instance
+    RtAudio dac;
+
+    // device/stream state
+    unsigned int currentDevice = (unsigned int)-1; // device id
+    RtAudioFormat activeFormat = RTAUDIO_SINT16;   // RTAUDIO_SINT16 || RTAUDIO_FLOAT32
     int activeChannels = 1;
     double activeSampleRate = 48000.0;
-    unsigned long framesPerBuffer = 512;
+    unsigned int framesPerBuffer = 512;
 
     std::vector<PaDevInfo> devices;
 
-    // populate device list (call after Pa_Initialize)
-    void enumerateDevices() {
-        devices.clear();
-        int cnt = Pa_GetDeviceCount();
-        for (int i = 0; i < cnt; ++i) {
-            const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
-            if (!info) continue;
-            PaDevInfo d;
-            d.index = i;
-            d.name = info->name ? info->name : std::string("unknown");
-            d.maxInputs = info->maxInputChannels;
-            d.defaultSampleRate = info->defaultSampleRate;
-            devices.push_back(d);
+    std::deque<int16_t> fifo;
+    std::mutex fifo_mtx;
+    std::condition_variable fifo_cv;
+    std::atomic<bool> streamOpen{false};
+
+    // monitor thread
+    std::thread monitor_thread;
+    std::atomic<bool> monitor_running{false};
+    std::string monitor_wav_path;
+    std::atomic<int> monitor_out_channels{1}; // out callback will use this
+
+    DeviceManager() {}
+
+    ~DeviceManager() {
+        stopMonitor();
+        closeStream();
+        if (dac.isStreamOpen()) {
+            try { dac.closeStream(); } catch(...) {}
         }
     }
 
+    // enumerate devices
+    void enumerateDevices() {
+        devices.clear();
+        unsigned int nd = 0;
+        try {
+            nd = dac.getDeviceCount();
+        } catch (const std::exception &e) {
+            std::cerr << "[ERROR] RtAudio getDeviceCount failed: " << e.what() << std::endl;
+            return;
+        }
+        for (unsigned int i = 0; i < nd; ++i) {
+            try {
+                RtAudio::DeviceInfo info = dac.getDeviceInfo(i);
+                if (info.inputChannels <= 0) continue;
+                PaDevInfo d;
+                d.index = static_cast<int>(i);
+                d.name = info.name;
+                d.maxInputs = static_cast<int>(info.inputChannels);
+                if (!info.sampleRates.empty()) d.defaultSampleRate = static_cast<double>(info.sampleRates[0]);
+                else d.defaultSampleRate = (info.preferredSampleRate > 0 ? static_cast<double>(info.preferredSampleRate) : 48000.0);
+                devices.push_back(d);
+            } catch (const std::exception &e) {
+                std::cerr << "[ERROR] RtAudio getDeviceInfo(" << i << ") failed: " << e.what() << " - skipping!" << std::endl;
+                continue;
+            }
+        }
+    }
+
+
+    // choose default device
+    // fallback - first device with >0 inputChannels
     PaDeviceIndex pickDefault() {
-        PaDeviceIndex def = Pa_GetDefaultInputDevice();
-        if (def != paNoDevice) {
-            const PaDeviceInfo* di = Pa_GetDeviceInfo(def);
-            if (di && di->maxInputChannels > 0) {
-                return def;
+        int def = -1;
+        try {
+            def = static_cast<int>(dac.getDefaultInputDevice());
+        } catch (const std::exception &e) {
+            (void)e;
+            def = -1;
+        }
+        if (def >= 0) {
+            try {
+                RtAudio::DeviceInfo info = dac.getDeviceInfo(static_cast<unsigned int>(def));
+                if (info.inputChannels > 0) return def;
+            } catch (...) {
+                // accept exception
             }
         }
         for (auto &d : devices) if (d.maxInputs > 0) return d.index;
         return paNoDevice;
     }
 
-    bool openStream(PaDeviceIndex dev, unsigned long requestedFramesPerBuffer, double requestedSampleRate = 0.0) {
-        if (stream) {
-            Pa_StopStream(stream);
-            Pa_CloseStream(stream);
-            stream = nullptr;
+    // rtaudio callback
+    static int rtaudio_callback(void *outputBuffer, void *inputBuffer,
+                                unsigned int nBufferFrames,
+                                double /*streamTime*/, RtAudioStreamStatus status,
+                                void *userData)
+    {
+        DeviceManager *mgr = reinterpret_cast<DeviceManager*>(userData);
+        if (!mgr) return 0;
+
+        if (status != RTAUDIO_NO_ERROR) {
+            // continue
         }
-        if (dev == paNoDevice) return false;
-        const PaDeviceInfo* di = Pa_GetDeviceInfo(dev);
-        if (!di) return false;
 
-        // choose sample rate
-        double sr = (requestedSampleRate > 0.0) ? requestedSampleRate : di->defaultSampleRate;
-        framesPerBuffer = requestedFramesPerBuffer;
-        // int16 first (float32 fallback)
-        PaStreamParameters inParams;
-        std::memset(&inParams, 0, sizeof(inParams));
-        inParams.device = dev;
-        // choose capture channels
-        int tryChannels = std::max(1, di->maxInputChannels);
-        inParams.channelCount = tryChannels;
-        inParams.hostApiSpecificStreamInfo = nullptr;
-        inParams.suggestedLatency = di->defaultLowInputLatency;
+        if (!inputBuffer) {
+            // no data available
+            std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+            for (unsigned int i = 0; i < nBufferFrames; ++i) mgr->fifo.push_back(0);
+            mgr->fifo_cv.notify_one();
+            return 0;
+        }
 
-        // attempt int16
-        inParams.sampleFormat = paInt16;
-        PaError e = Pa_IsFormatSupported(&inParams, nullptr, sr);
-        if (e == paFormatIsSupported) {
-            activeFormat = paInt16;
-            activeChannels = tryChannels;
-            activeSampleRate = sr;
-        } else {
-            // try float32 (common with PipeWire)
-            inParams.sampleFormat = paFloat32;
-            e = Pa_IsFormatSupported(&inParams, nullptr, sr);
-            if (e == paFormatIsSupported) {
-                activeFormat = paFloat32;
-                activeChannels = tryChannels;
-                activeSampleRate = sr;
-            } else {
-                // fallback (try to open playback with int16 - PA does conversion)
-                activeFormat = paInt16;
-                activeChannels = std::min(1, tryChannels);
-                activeSampleRate = sr;
+        if (mgr->activeFormat == RTAUDIO_SINT16) {
+            // read int16
+            int16_t* in = static_cast<int16_t*>(inputBuffer);
+            unsigned int channels = static_cast<unsigned int>(mgr->activeChannels);
+            for (unsigned int f = 0; f < nBufferFrames; ++f) {
+                int sum = 0;
+                for (unsigned int c = 0; c < channels; ++c) sum += static_cast<int>(in[f * channels + c]);
+                int avg = sum / static_cast<int>(channels);
+                if (avg > 32767) avg = 32767;
+                if (avg < -32768) avg = -32768;
+                {
+                    std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+                    mgr->fifo.push_back(static_cast<int16_t>(avg));
+                }
+            }
+        } else { // float32
+            float* in = static_cast<float*>(inputBuffer);
+            unsigned int channels = static_cast<unsigned int>(mgr->activeChannels);
+            for (unsigned int f = 0; f < nBufferFrames; ++f) {
+                double sum = 0.0;
+                for (unsigned int c = 0; c < channels; ++c) sum += static_cast<double>(in[f * channels + c]);
+                double avg = sum / channels;
+                if (avg > 1.0) avg = 1.0;
+                if (avg < -1.0) avg = -1.0;
+                int s16 = static_cast<int>(avg * 32767.0);
+                if (s16 > 32767) s16 = 32767;
+                if (s16 < -32768) s16 = -32768;
+                {
+                    std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+                    mgr->fifo.push_back(static_cast<int16_t>(s16));
+                }
             }
         }
 
-        // open stream with parameters
-        PaStreamParameters finalParams;
-        std::memset(&finalParams, 0, sizeof(finalParams));
-        finalParams.device = dev;
-        finalParams.channelCount = activeChannels;
-        finalParams.sampleFormat = activeFormat;
-        finalParams.suggestedLatency = di->defaultLowInputLatency;
-        finalParams.hostApiSpecificStreamInfo = nullptr;
+        // notify
+        mgr->fifo_cv.notify_one();
+        return 0;
+    }
+    static int recordCallback(void *outputBuffer, void *inputBuffer,
+                              unsigned int nBufferFrames, double /*streamTime*/,
+                              RtAudioStreamStatus status, void *userData)
+    {
+        DeviceManager *mgr = reinterpret_cast<DeviceManager*>(userData);
+        if (!mgr) return 0;
 
-        PaError openErr = Pa_OpenStream(&stream,
-                                       &finalParams,
-                                       nullptr,              // no output
-                                       activeSampleRate,
-                                       framesPerBuffer,
-                                       paClipOff,
-                                       nullptr,
-                                       nullptr);
-        if (openErr != paNoError) {
-            std::cerr << "[ERROR] Pa_OpenStream failed: " << Pa_GetErrorText(openErr) << " (" << openErr << ")\n";
-            stream = nullptr;
-            return false;
+        // status can be RTAUDIO_STREAM_STOPPED / XR
+        (void)status;
+
+        if (!inputBuffer) {
+            // no data -> push zeros
+            std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+            for (unsigned int i = 0; i < nBufferFrames; ++i) mgr->fifo.push_back(0);
+            mgr->fifo_cv.notify_one();
+            return 0;
         }
-        PaError startErr = Pa_StartStream(stream);
-        if (startErr != paNoError) {
-            std::cerr << "[ERROR] Pa_StartStream failed: " << Pa_GetErrorText(startErr) << " (" << startErr << ")\n";
-            Pa_CloseStream(stream);
-            stream = nullptr;
-            return false;
+
+        // handle int16
+        if (mgr->activeFormat == RTAUDIO_SINT16) {
+            int16_t* in = static_cast<int16_t*>(inputBuffer);
+            unsigned int channels = static_cast<unsigned int>(mgr->activeChannels);
+            std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+            for (unsigned int f = 0; f < nBufferFrames; ++f) {
+                int sum = 0;
+                for (unsigned int c = 0; c < channels; ++c) sum += static_cast<int>(in[f * channels + c]);
+                int avg = sum / static_cast<int>(channels);
+                if (avg > 32767) avg = 32767;
+                if (avg < -32768) avg = -32768;
+                mgr->fifo.push_back(static_cast<int16_t>(avg));
+            }
+            mgr->fifo_cv.notify_one();
+            return 0;
         }
-        currentDevice = dev;
-        std::cout << "[INFO] opened input device '" << (di->name ? di->name : "unknown")
-                  << "' sr=" << activeSampleRate
-                  << " ch=" << activeChannels
-                  << " fmt=" << ((activeFormat == paFloat32) ? "float32" : "int16")
-                  << " frames=" << framesPerBuffer << "\n";
-        return true;
+
+        // handle float32
+        float* in = static_cast<float*>(inputBuffer);
+        unsigned int channels = static_cast<unsigned int>(mgr->activeChannels);
+        {
+            std::lock_guard<std::mutex> lk(mgr->fifo_mtx);
+            for (unsigned int f = 0; f < nBufferFrames; ++f) {
+                double sum = 0.0;
+                for (unsigned int c = 0; c < channels; ++c) sum += static_cast<double>(in[f * channels + c]);
+                double avg = sum / static_cast<double>(channels);
+                if (avg > 1.0) avg = 1.0;
+                if (avg < -1.0) avg = -1.0;
+                int s16 = static_cast<int>(avg * 32767.0);
+                if (s16 > 32767) s16 = 32767;
+                if (s16 < -32768) s16 = -32768;
+                mgr->fifo.push_back(static_cast<int16_t>(s16));
+            }
+        }
+        mgr->fifo_cv.notify_one();
+        return 0;
     }
 
-    // close stream safely
+    // output callback for monitor
+    static int outCallback(void *outputBuffer, void * /*inputBuffer*/,
+                           unsigned int nBufferFrames, double /*streamTime*/,
+                           RtAudioStreamStatus status, void *userData)
+    {
+        DeviceManager *mgr = reinterpret_cast<DeviceManager*>(userData);
+        if (!mgr) return 0;
+
+        (void)status;
+
+        float *out = static_cast<float*>(outputBuffer);
+        unsigned int outCh = static_cast<unsigned int>(mgr->monitor_out_channels.load());
+        if (outCh == 0) outCh = 1;
+
+        // attempt to pop nBufferFrames samples
+        std::unique_lock<std::mutex> lk(mgr->fifo_mtx);
+        if (mgr->fifo.size() < nBufferFrames) {
+            // partial underflow -> fill zeros
+            for (unsigned int f = 0; f < nBufferFrames; ++f) {
+                for (unsigned int c = 0; c < outCh; ++c) out[f * outCh + c] = 0.0f;
+            }
+            return 0;
+        }
+
+        // read and output
+        for (unsigned int f = 0; f < nBufferFrames; ++f) {
+            int16_t s = mgr->fifo.front();
+            mgr->fifo.pop_front();
+            float sample = static_cast<float>(s) / 32768.0f;
+            // duplicate to channels
+            out[f * outCh + 0] = sample;
+            if (outCh > 1) {
+                for (unsigned int c = 1; c < outCh; ++c) out[f * outCh + c] = sample;
+            }
+        }
+        lk.unlock();
+        return 0;
+    }
+
+
+    bool openStream(PaDeviceIndex dev, unsigned long requestedFramesPerBuffer, double requestedSampleRate) {
+        closeStream();
+
+    if (dev == paNoDevice) return false;
+    unsigned int deviceId = static_cast<unsigned int>(dev);
+
+    RtAudio::DeviceInfo info;
+    try {
+        info = dac.getDeviceInfo(deviceId);
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] RtAudio getDeviceInfo: " << e.what() << std::endl;
+        return false;
+    }
+    if (info.inputChannels <= 0) {
+        std::cerr << "[ERROR] Selected device has no input channels!" << std::endl;
+        return false;
+    }
+
+    // transform to unsigned (avoid std::max errors)
+    unsigned int ch = std::max<unsigned int>(1u, static_cast<unsigned int>(info.inputChannels));
+    double sr = (requestedSampleRate > 0.0) ? requestedSampleRate :
+                (info.preferredSampleRate > 0 ? static_cast<double>(info.preferredSampleRate) : 48000.0);
+
+    framesPerBuffer = requestedFramesPerBuffer;
+
+    // open int16 first fallback to float
+    RtAudioFormat fmt = RTAUDIO_SINT16;
+    RtAudio::StreamParameters iParams;
+    iParams.deviceId = deviceId;
+    iParams.nChannels = ch;
+    iParams.firstChannel = 0;
+
+    // int16
+    try {
+        dac.openStream(nullptr, &iParams, fmt, static_cast<unsigned int>(sr), &framesPerBuffer, &recordCallback, this);
+        activeFormat = fmt;
+    } catch (const std::exception &e1) {
+        // float32
+        try { if (dac.isStreamOpen()) dac.closeStream(); } catch(...) {}
+        fmt = RTAUDIO_FLOAT32;
+        try {
+            dac.openStream(nullptr, &iParams, fmt, static_cast<unsigned int>(sr), &framesPerBuffer, &recordCallback, this);
+            activeFormat = fmt;
+        } catch (const std::exception &e2) {
+            std::cerr << "[ERROR] RtAudio openStream failed: " << e2.what() << "\n";
+            return false;
+        }
+    }
+
+    activeChannels = static_cast<int>(ch);
+    activeSampleRate = sr;
+    currentDevice = dev;
+    streamOpen.store(true);
+
+    try {
+        dac.startStream();
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] RtAudio startStream failed: " << e.what() << "\n";
+        try { if (dac.isStreamOpen()) dac.closeStream(); } catch(...) {}
+        streamOpen.store(false);
+        return false;
+    }
+
+    std::cout << "[INFO] Opened rtaudio input device '" << info.name
+              << "' sr=" << activeSampleRate
+              << " ch=" << activeChannels
+              << " fmt=" << ((activeFormat==RTAUDIO_FLOAT32)?"float32":"int16")
+              << " frames=" << framesPerBuffer << "\n";
+
+    return true;
+}
+
     void closeStream() {
-        if (!stream) return;
-        Pa_StopStream(stream);
-        Pa_CloseStream(stream);
-        stream = nullptr;
-        currentDevice = paNoDevice;
+        // stop stream if open
+        if (dac.isStreamOpen()) {
+            try {
+                dac.stopStream();
+            } catch (...) {}
+            try {
+                dac.closeStream();
+            } catch (...) {}
+        }
+        {
+            std::lock_guard<std::mutex> lk(fifo_mtx);
+            fifo.clear();
+        }
+        streamOpen.store(false);
     }
 
     template<typename VisualizerType>
     bool readAndProcess(std::vector<int16_t> &outMono, VisualizerType &visualizer, VoskRecognizer* vosk_recognizer, size_t framesPerBufferLocal) {
-        if (!stream) return false;
-        // prepare storage sized to framesPerBufferLocal
+        if (!streamOpen.load()) return false;
         outMono.assign(framesPerBufferLocal, 0);
 
-        if (activeFormat == paInt16) {
-            std::vector<int16_t> buf(framesPerBufferLocal * activeChannels);
-            PaError r = Pa_ReadStream(stream, buf.data(), framesPerBufferLocal);
-            if (r && r != paInputOverflowed) {
-                std::cerr << "[ERROR] Pa_ReadStream int16: " << Pa_GetErrorText(r) << " (" << r << ")\n";
-                return false;
-            }
-            // downmix if multi-channel
-            if (activeChannels == 1) {
-                // copy directly
-                std::copy(buf.begin(), buf.begin() + framesPerBufferLocal, outMono.begin());
-            } else {
-                for (size_t i = 0; i < framesPerBufferLocal; ++i) {
-                    int sum = 0;
-                    for (int c = 0; c < activeChannels; ++c) sum += static_cast<int>(buf[i * activeChannels + c]);
-                    sum /= activeChannels;
-                    outMono[i] = static_cast<int16_t>(std::clamp(sum, -32768, 32767));
-                }
-            }
-        } else { // float32
-            std::vector<float> fbuf(framesPerBufferLocal * activeChannels);
-            PaError r = Pa_ReadStream(stream, fbuf.data(), framesPerBufferLocal);
-            if (r && r != paInputOverflowed) {
-                std::cerr << "[ERROR] Pa_ReadStream float: " << Pa_GetErrorText(r) << " (" << r << ")\n";
-                return false;
-            }
-            if (activeChannels == 1) {
-                for (size_t i = 0; i < framesPerBufferLocal; ++i) {
-                    float v = fbuf[i];
-                    if (v > 1.0f) v = 1.0f;
-                    if (v < -1.0f) v = -1.0f;
-                    outMono[i] = static_cast<int16_t>(v * 32767.0f);
-                }
-            } else {
-                for (size_t i = 0; i < framesPerBufferLocal; ++i) {
-                    double sum = 0.0;
-                    for (int c = 0; c < activeChannels; ++c) sum += fbuf[i * activeChannels + c];
-                    double avg = sum / activeChannels;
-                    if (avg > 1.0) avg = 1.0;
-                    if (avg < -1.0) avg = -1.0;
-                    outMono[i] = static_cast<int16_t>(avg * 32767.0);
-                }
-            }
+        // wait for enough samples
+        std::unique_lock<std::mutex> lk(fifo_mtx);
+        bool ok = fifo_cv.wait_for(lk, std::chrono::milliseconds(500), [&]{ return fifo.size() >= framesPerBufferLocal; });
+        if (!ok) {
+            // timeout - no data
+            return false;
         }
+        // pop framesPerBufferLocal samples
+        for (size_t i = 0; i < framesPerBufferLocal; ++i) {
+            outMono[i] = fifo.front();
+            fifo.pop_front();
+        }
+        lk.unlock();
 
-        // feed vosk (mono int16)
+        // feed vosk
         if (vosk_recognizer) {
             vosk_recognizer_accept_waveform(vosk_recognizer,
                                            reinterpret_cast<const char*>(outMono.data()),
                                            static_cast<int>(outMono.size() * sizeof(int16_t)));
         }
-        // push to visualizer (mono int16)
+        // push to visualizer
         visualizer.PushSamples(outMono.data(), outMono.size());
         return true;
     }
-    void showDeviceSelectorUI() {
+    void startMonitor(const std::string &dump_wav_path = std::string()) {
+        if (monitor_running.load()) return;
+        monitor_wav_path = dump_wav_path;
+        monitor_running.store(true);
 
+        monitor_thread = std::thread([this]() {
+            RtAudio outdac;
+            RtAudio::StreamParameters outParams;
+            unsigned int outDev = 0;
+            try { outDev = outdac.getDefaultOutputDevice(); }
+            catch (const std::exception &e) {
+                std::cerr << "[ERROR] Monitor: getDefaultOutputDevice failed: " << e.what() << "\n";
+                monitor_running.store(false);
+                return;
+            }
+            RtAudio::DeviceInfo dout;
+            try { dout = outdac.getDeviceInfo(outDev); } catch (const std::exception &e) {
+                std::cerr << "[ERROR] Monitor: getDeviceInfo(outDev) failed: " << e.what() << "\n";
+                monitor_running.store(false);
+                return;
+            }
+
+            outParams.deviceId = outDev;
+            unsigned int outCh = std::max<unsigned int>(1u, static_cast<unsigned int>(dout.outputChannels));
+            outParams.nChannels = outCh;
+            outParams.firstChannel = 0;
+            unsigned int outFrames = framesPerBuffer; // use same frames
+            RtAudioFormat outFmt = RTAUDIO_FLOAT32;
+
+            // expose out channels to callback
+            monitor_out_channels.store(static_cast<int>(outCh));
+
+            try {
+                outdac.openStream(&outParams, nullptr, outFmt, static_cast<unsigned int>(activeSampleRate), &outFrames, &DeviceManager::outCallback, this);
+                outdac.startStream();
+            } catch (const std::exception &e) {
+                std::cerr << "[ERROR] monitor output stream failed: " << e.what() << std::endl;
+                monitor_running.store(false);
+                return;
+            }
+
+            // keep alive (the outCallback will pull from fifo)
+            while (monitor_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            try { if (outdac.isStreamOpen()) { outdac.stopStream(); outdac.closeStream(); } } catch(...) {}
+            monitor_running.store(false);
+        });
+    }
+
+
+    void stopMonitor() {
+        if (!monitor_running.load()) return;
+        monitor_running.store(false);
+        if (monitor_thread.joinable()) monitor_thread.join();
     }
 };
 
-struct InputDebugger {
-    std::thread th;
-    std::atomic<bool> running{false};
-    std::atomic<bool> stopRequested{false};
 
-    // configuration
-    int deviceIndex = -1;                 // default input device
-    std::string dumpPath;                 // empty = no dump
-    int runSeconds = 0;                   // run until stop()
-    double sampleRate = 48000.0;
-    int framesPerBuffer = 512;
-
-    // internals
-    PaStream* inStream = nullptr;
-    PaStream* outStream = nullptr;
-
-    // wav dumper
-    struct Wav {
-        std::ofstream f;
-        uint32_t data_bytes = 0;
-        int sr = 48000;
-        int ch = 1;
-        bool open(const std::string &path, int sampleRate, int channels) {
-            sr = sampleRate; ch = channels;
-            f.open(path, std::ios::binary);
-            if (!f.is_open()) return false;
-            f.write("RIFF",4);
-            uint32_t cz = 0; f.write(reinterpret_cast<const char*>(&cz),4);
-            f.write("WAVE",4);
-            f.write("fmt ",4);
-            uint32_t sub1 = 16; f.write(reinterpret_cast<const char*>(&sub1),4);
-            uint16_t audioFmt = 1; f.write(reinterpret_cast<const char*>(&audioFmt),2);
-            uint16_t numCh = static_cast<uint16_t>(ch); f.write(reinterpret_cast<const char*>(&numCh),2);
-            uint32_t srate = static_cast<uint32_t>(sr); f.write(reinterpret_cast<const char*>(&srate),4);
-            uint16_t bits = 16;
-            uint32_t byteRate = sr * ch * (bits/8); f.write(reinterpret_cast<const char*>(&byteRate),4);
-            uint16_t blockAlign = ch * (bits/8); f.write(reinterpret_cast<const char*>(&blockAlign),2);
-            f.write(reinterpret_cast<const char*>(&bits),2);
-            f.write("data",4);
-            uint32_t ds = 0; f.write(reinterpret_cast<const char*>(&ds),4);
-            data_bytes = 0;
-            return true;
-        }
-        void write_s16(const int16_t* s, size_t n) {
-            if (!f.is_open()) return;
-            f.write(reinterpret_cast<const char*>(s), n * sizeof(int16_t));
-            data_bytes += static_cast<uint32_t>(n * sizeof(int16_t));
-        }
-        void close() {
-            if (!f.is_open()) return;
-            f.seekp(4, std::ios::beg);
-            uint32_t riff = 36 + data_bytes; f.write(reinterpret_cast<const char*>(&riff),4);
-            f.seekp(40, std::ios::beg);
-            uint32_t db = data_bytes; f.write(reinterpret_cast<const char*>(&db),4);
-            f.close();
-        }
-    } wav;
-
-    // debugger thread
-    bool start(int deviceIndex_ = -1,
-               double sampleRate_ = 48000.0,
-               int framesPerBuffer_ = 512,
-               const std::string &dumpPath_ = "",
-               int runSeconds_ = 0) {
-        if (running.load()) return false; // already running
-        deviceIndex = deviceIndex_;
-        sampleRate = sampleRate_;
-        framesPerBuffer = framesPerBuffer_;
-        dumpPath = dumpPath_;
-        runSeconds = runSeconds_;
-        stopRequested.store(false);
-        running.store(true);
-        th = std::thread(&InputDebugger::debugger_start, this);
-        return true;
-    }
-
-    // request stop and wait for the thread to finish
-    void stop() {
-        if (!running.load()) return;
-        stopRequested.store(true);
-        if (th.joinable()) th.join();
-        running.store(false);
-    }
-
-    // ensure thread stopped
-    ~InputDebugger() {
-        stopRequested.store(true);
-        if (th.joinable()) th.join();
-    }
-
-private:
-    // clamp convert
-    static inline int16_t float_to_s16(float v) {
-        if (v > 1.0f) v = 1.0f;
-        if (v < -1.0f) v = -1.0f;
-        return static_cast<int16_t>(v * 32767.0f);
-    }
-
-    void debugger_start() {
-        // pick devices
-        PaDeviceIndex inDev = (deviceIndex >= 0) ? static_cast<PaDeviceIndex>(deviceIndex) : Pa_GetDefaultInputDevice();
-        if (inDev == paNoDevice) {
-            std::cerr << "[ERROR] <DEBUG> No input device available for debugger" << std::endl;
-            running.store(false);
-            return;
-        }
-        const PaDeviceInfo* inInfo = Pa_GetDeviceInfo(inDev);
-        if (!inInfo) {
-            std::cerr << "[ERROR] <DEBUG> Pa_GetDeviceInfo(inDev) null" << std::endl;
-            running.store(false);
-            return;
-        }
-        PaDeviceIndex outDev = Pa_GetDefaultOutputDevice();
-        if (outDev == paNoDevice) {
-            std::cerr << "[ERROR] <DEBUG> No output device available for debugger" << std::endl;
-            running.store(false);
-            return;
-        }
-        const PaDeviceInfo* outInfo = Pa_GetDeviceInfo(outDev);
-        if (!outInfo) {
-            std::cerr << "[ERROR] <DEBUG> Pa_GetDeviceInfo(outDev) null" << std::endl;
-            running.store(false);
-            return;
-        }
-
-        int inChannels = std::max(1, inInfo->maxInputChannels);
-        int outChannels = std::max(1, outInfo->maxOutputChannels);
-        unsigned long buf = static_cast<unsigned long>(framesPerBuffer);
-
-        // negotiate input format (try float32, fallback to int16)
-        PaStreamParameters inParams;
-        std::memset(&inParams, 0, sizeof(inParams));
-        inParams.device = inDev;
-        inParams.channelCount = inChannels;
-        inParams.sampleFormat = paFloat32;
-        inParams.suggestedLatency = inInfo->defaultLowInputLatency;
-        inParams.hostApiSpecificStreamInfo = nullptr;
-
-        PaSampleFormat activeFormat = paFloat32;
-        PaError e = Pa_IsFormatSupported(&inParams, nullptr, sampleRate);
-        if (e != paFormatIsSupported) {
-            inParams.sampleFormat = paInt16;
-            e = Pa_IsFormatSupported(&inParams, nullptr, sampleRate);
-            if (e != paFormatIsSupported) {
-                // still try int16 open - pulse converts
-                inParams.sampleFormat = paInt16;
-            } else activeFormat = paInt16;
-        } else activeFormat = paFloat32;
-
-        PaStreamParameters outParams;
-        std::memset(&outParams, 0, sizeof(outParams));
-        outParams.device = outDev;
-        outParams.channelCount = outChannels;
-        outParams.sampleFormat = paFloat32; // output float
-        outParams.suggestedLatency = outInfo->defaultLowOutputLatency;
-        outParams.hostApiSpecificStreamInfo = nullptr;
-
-        // open streams
-        PaError err = Pa_OpenStream(&inStream, &inParams, nullptr, sampleRate, buf, paNoFlag, nullptr, nullptr);
-        if (err != paNoError) {
-            std::cerr << "[ERROR] <DEBUG> Pa_OpenStream(in) failed: " << Pa_GetErrorText(err) << std::endl;
-            running.store(false);
-            return;
-        }
-        err = Pa_OpenStream(&outStream, nullptr, &outParams, sampleRate, buf, paNoFlag, nullptr, nullptr);
-        if (err != paNoError) {
-            std::cerr << "[ERROR] <DEBUG> Pa_OpenStream(out) failed: " << Pa_GetErrorText(err) << std::endl;
-            Pa_CloseStream(inStream);
-            inStream = nullptr;
-            running.store(false);
-            return;
-        }
-
-        err = Pa_StartStream(inStream);
-        if (err != paNoError) {
-            std::cerr << "[ERROR] <DEBUG> Pa_StartStream(in) failed: " << Pa_GetErrorText(err) << std::endl;
-            Pa_CloseStream(inStream);
-            Pa_CloseStream(outStream);
-            inStream = outStream = nullptr;
-            running.store(false);
-            return;
-        }
-        err = Pa_StartStream(outStream);
-        if (err != paNoError) {
-            std::cerr << "[ERROR] <DEBUG> Pa_StartStream(out) failed: " << Pa_GetErrorText(err) << std::endl;
-            Pa_StopStream(inStream); Pa_CloseStream(inStream);
-            Pa_CloseStream(outStream);
-            inStream = outStream = nullptr;
-            running.store(false);
-            return;
-        }
-
-        // open wav if requested
-        bool dump = false;
-        if (!dumpPath.empty()) {
-            dump = wav.open(dumpPath, static_cast<int>(sampleRate), outChannels);
-            if (!dump) {
-                std::cerr << "[ERROR] <DEBUG> Failed to open WAV '" << dumpPath << "'! Continuing without dump." << std::endl;
-                dump = false;
-            }
-        }
-
-        // buffers
-        std::vector<float> inFloat(buf * inChannels);
-        std::vector<int16_t> inS16(buf * inChannels);
-        std::vector<float> outFloat(buf * outChannels);
-
-        using clock = std::chrono::steady_clock;
-        auto start = clock::now();
-        auto lastPrint = start;
-        double peak = 0.0, sumSq = 0.0;
-        uint64_t sampleCount = 0;
-
-        while (!stopRequested.load()) {
-            if (runSeconds > 0) {
-                auto now = clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now - start).count() >= runSeconds) break;
-            }
-
-            if (activeFormat == paFloat32) {
-                PaError r = Pa_ReadStream(inStream, inFloat.data(), buf);
-                if (r && r != paInputOverflowed) {
-                    std::cerr << "[ERROR] <DEBUG> Pa_ReadStream(float) returned: " << Pa_GetErrorText(r) << std::endl;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    continue;
-                }
-                for (unsigned long f = 0; f < buf; ++f) {
-                    float avg = 0.0f;
-                    for (int c=0; c < inChannels; ++c) avg += inFloat[f * inChannels + c];
-                    avg /= static_cast<float>(inChannels);
-                    for (int oc=0; oc < outChannels; ++oc) outFloat[f * outChannels + oc] = avg;
-                    float a = std::fabs(avg);
-                    if (a > peak) peak = a;
-                    sumSq += (avg * avg);
-                    ++sampleCount;
-                }
-                PaError w = Pa_WriteStream(outStream, outFloat.data(), buf);
-                if (w && w != paOutputUnderflowed) {
-                    std::cerr << "[ERROR] <DEBUG> Pa_WriteStream returned: " << Pa_GetErrorText(w) << std::endl;
-                }
-                if (dump) {
-                    std::vector<int16_t> tmp(buf * outChannels);
-                    for (unsigned long i=0;i<buf * outChannels;++i) tmp[i] = float_to_s16(outFloat[i]);
-                    wav.write_s16(tmp.data(), tmp.size());
-                }
-            } else { // int16 input
-                PaError r = Pa_ReadStream(inStream, inS16.data(), buf);
-                if (r && r != paInputOverflowed) {
-                    std::cerr << "[ERROR] <DEBUG> Pa_ReadStream(int16) returned: " << Pa_GetErrorText(r) << std::endl;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    continue;
-                }
-                for (unsigned long f = 0; f < buf; ++f) {
-                    double sum = 0.0;
-                    for (int c=0; c < inChannels; ++c) sum += inS16[f * inChannels + c];
-                    double avg = sum / inChannels;
-                    float nf = static_cast<float>(avg / 32768.0);
-                    for (int oc=0; oc < outChannels; ++oc) outFloat[f * outChannels + oc] = nf;
-                    float a = std::fabs(nf);
-                    if (a > peak) peak = a;
-                    sumSq += (nf * nf);
-                    ++sampleCount;
-                }
-                PaError w = Pa_WriteStream(outStream, outFloat.data(), buf);
-                if (w && w != paOutputUnderflowed) {
-                    std::cerr << "[ERROR] <DEBUG> Pa_WriteStream returned: " << Pa_GetErrorText(w) << std::endl;
-                }
-                if (dump) {
-                    std::vector<int16_t> tmp(buf * outChannels);
-                    for (unsigned long i=0;i<buf * outChannels;++i) {
-                        float v = outFloat[i];
-                        if (v > 1.0f) v = 1.0f;
-                        if (v < -1.0f) v = -1.0f;
-                        tmp[i] = static_cast<int16_t>(v * 32767.0f);
-                    }
-                    wav.write_s16(tmp.data(), tmp.size());
-                }
-            }
-
-            auto now = clock::now();
-            if (now - lastPrint >= std::chrono::milliseconds(200)) {
-                double rms = (sampleCount>0) ? std::sqrt(sumSq / sampleCount) : 0.0;
-                double peakDb = (peak>0.0) ? 20.0 * std::log10(peak) : -120.0;
-                double rmsDb = (rms>0.0) ? 20.0 * std::log10(rms) : -120.0;
-                std::cout << "[INFO] <DEBUG> PEAK=" << peak << " (" << peakDb << " dBFS)"
-                          << " RMS=" << rms << " (" << rmsDb << " dBFS)\n";
-                peak = 0.0; sumSq = 0.0; sampleCount = 0;
-                lastPrint = now;
-            }
-        }
-
-        // cleanup
-        if (dump) { wav.close(); std::cout << "[INFO] wav saved: " << dumpPath << "\n"; }
-        if (inStream) { Pa_StopStream(inStream); Pa_CloseStream(inStream); inStream = nullptr; }
-        if (outStream) { Pa_StopStream(outStream); Pa_CloseStream(outStream); outStream = nullptr; }
-
-        running.store(false);
-        stopRequested.store(false);
-    }
-};
-
-static PaDeviceIndex SelectInputDeviceWithPrompt(DeviceManager &dm) {
-    // enumerate and gather devices
+static unsigned int SelectInputDeviceWithPrompt(DeviceManager &dm) {
+    // enumerate devices first
     dm.enumerateDevices();
     if (dm.devices.empty()) {
-        std::cerr << "[INFO] No portaudio input devices found!" << std::endl;
-        return paNoDevice;
+        std::cerr << "[INFO] No rtaudio input devices found!\n";
+        return static_cast<unsigned int>(-1);
     }
 
     // build the device list message
     std::ostringstream oss;
-    oss << "Available input devices:\n";
+    oss << "Available input devices:\n\n";
     for (auto &d : dm.devices) {
-        oss << "[" << d.index << "] " << d.name << " (inputs=" << d.maxInputs
+        oss << "[" << d.index << "] " << d.name
+            << " (inputs=" << d.maxInputs
             << ", defaultSr=" << d.defaultSampleRate << ")\n";
     }
-    // mark portaudio default
-    PaDeviceIndex paDefault = Pa_GetDefaultInputDevice();
-    if (paDefault != paNoDevice) {
-        const PaDeviceInfo* di = Pa_GetDeviceInfo(paDefault);
-        if (di) oss << "\nportaudio default: [" << paDefault << "] " << di->name << "\n";
-    } else {
-        oss << "\nportaudio has no default input device\n";
+
+    // rt-audio default input device
+    unsigned int rtDefault = static_cast<unsigned int>(-1);
+    try {
+        rtDefault = dm.dac.getDefaultInputDevice();
+        if (rtDefault != static_cast<unsigned int>(-1)) {
+            RtAudio::DeviceInfo di = dm.dac.getDeviceInfo(rtDefault);
+            oss << "\nrtaudio default: [" << rtDefault << "] " << di.name << "\n";
+        } else {
+            oss << "\nrtaudio has no default input device\n";
+        }
+    } catch (...) {
+        oss << "\n(rtaudio default device not available)\n";
     }
 
-    // try to get pulse default device
+    // try to query pulse default source (pactl), non-fatal
     std::string pulseDefault;
     FILE *fp = popen("pactl info 2>/dev/null", "r");
     if (fp) {
         char buf[512];
         while (fgets(buf, sizeof(buf), fp) != nullptr) {
             std::string line(buf);
-            // look for default source
             auto pos = line.find("Default Source:");
             if (pos == std::string::npos) pos = line.find("Default Source");
             if (pos != std::string::npos) {
-                // split at ':'
                 auto col = line.find(':');
                 std::string value = (col != std::string::npos) ? line.substr(col+1) : line;
                 // trim whitespace
@@ -572,117 +538,86 @@ static PaDeviceIndex SelectInputDeviceWithPrompt(DeviceManager &dm) {
         oss << "\n(pulse default source not found via pactl)\n";
     }
 
-    PaDeviceIndex autoMatch = paNoDevice;
+    // try to find an auto-match candidate (case-insensitive substring match)
+    unsigned int autoMatch = static_cast<unsigned int>(-1);
     if (!pulseDefault.empty()) {
         auto lower = [](std::string s){ std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); }); return s; };
         std::string needle = lower(pulseDefault);
         for (auto &d : dm.devices) {
             std::string dn = lower(d.name);
-            if (dn.find(needle) != std::string::npos) {
-                autoMatch = d.index;
-                break;
-            }
+            if (dn.find(needle) != std::string::npos) { autoMatch = static_cast<unsigned int>(d.index); break; }
         }
-        if (autoMatch != paNoDevice) oss << "auto-match candidate: [" << autoMatch << "]\n";
+        if (autoMatch != static_cast<unsigned int>(-1)) oss << "\nauto-match candidate: [" << autoMatch << "]\n";
     }
 
-    // instructions for the user
-    oss << "\nEnter device index to select, 'd' for portaudio default, 'a' for auto-match";
-    if (paDefault == paNoDevice) oss << " (no pa default available)";
-    oss << ", or leave blank to accept default.\n";
+    oss << "\nEnter device index to select, 'r' for rtaudio default, 'a' for auto-match (if available),\n"
+           "or leave blank to accept default / first device.\n";
 
-    std::string promptMsg = oss.str();
+    // prompt user (blocking - make sure this isn't called on the UI thread)
+    std::string ans = ui_prompt_str(oss.str());
 
-    // prompt user
-    std::future<std::string> fut = ui.prompt_user_async_string(promptMsg);
-    std::string ans = fut.get();
-    // trim
-    auto trim_s = [](std::string &s){ s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){ return !std::isspace(ch); })); s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), s.end()); };
+    // helper trim
+    auto trim_s = [](std::string &s){
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){ return !std::isspace(ch); }));
+        s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), s.end());
+    };
     trim_s(ans);
 
     if (ans.empty()) {
-        // empty -> accept portaudio default if available, else first input device
-        if (paDefault != paNoDevice) return paDefault;
-        for (auto &d : dm.devices) if (d.maxInputs > 0) return d.index;
-        return paNoDevice;
+        // empty -> prefer rtaudio default, else first input device
+        if (rtDefault != static_cast<unsigned int>(-1)) return rtDefault;
+        for (auto &d : dm.devices) if (d.maxInputs > 0) return static_cast<unsigned int>(d.index);
+        return static_cast<unsigned int>(-1);
     }
 
     // lowercase answer for commands
     std::string ans_l = ans;
     std::transform(ans_l.begin(), ans_l.end(), ans_l.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
 
-    if (ans_l == "d") {
-        return (paDefault != paNoDevice) ? paDefault : paNoDevice;
+    if (ans_l == "r") {
+        return (rtDefault != static_cast<unsigned int>(-1)) ? rtDefault : static_cast<unsigned int>(-1);
     }
     if (ans_l == "a") {
-        if (autoMatch != paNoDevice) return autoMatch;
-        // fallback to default if no auto match
-        if (paDefault != paNoDevice) return paDefault;
-        for (auto &d : dm.devices) if (d.maxInputs > 0) return d.index;
-        return paNoDevice;
+        if (autoMatch != static_cast<unsigned int>(-1)) return autoMatch;
+        // fallback to default
+        if (rtDefault != static_cast<unsigned int>(-1)) return rtDefault;
+        for (auto &d : dm.devices) if (d.maxInputs > 0) return static_cast<unsigned int>(d.index);
+        return static_cast<unsigned int>(-1);
     }
 
-    // try to parse as integer index
+    // try parsing integer index
     try {
         int idx = std::stoi(ans);
-        // verify the index exists and has inputs
-        const PaDeviceInfo* pd = Pa_GetDeviceInfo(static_cast<PaDeviceIndex>(idx));
-        if (pd && pd->maxInputChannels > 0) return static_cast<PaDeviceIndex>(idx);
-        // if not valid, fall through to default
-        std::cerr << "[ERROR] User selected invalid device index: " << idx << " - falling back to default!" << std::endl;
+        // validate via RtAudio
+        try {
+            RtAudio::DeviceInfo pd = dm.dac.getDeviceInfo(static_cast<unsigned int>(idx));
+            if (pd.inputChannels > 0) return static_cast<unsigned int>(idx);
+        } catch (...) {
+            // fallback to dm.devices search
+            for (auto &d : dm.devices) if (d.index == idx && d.maxInputs > 0) return static_cast<unsigned int>(d.index);
+        }
+        std::cerr << "[ERROR] User selected invalid device index: " << idx << " - falling back to default!\n";
     } catch (...) {
-        std::cerr << "[ERROR] Could not parse user selection: '" << ans << "' - falling back to default!" << std::endl;
+        std::cerr << "[ERROR] Could not parse user selection: '" << ans << "' - falling back to default!\n";
     }
 
-    // fallback
-    if (paDefault != paNoDevice) return paDefault;
-    for (auto &d : dm.devices) if (d.maxInputs > 0) return d.index;
-    return paNoDevice;
+    // final fallback
+    if (rtDefault != static_cast<unsigned int>(-1)) return rtDefault;
+    for (auto &d : dm.devices) if (d.maxInputs > 0) return static_cast<unsigned int>(d.index);
+    return static_cast<unsigned int>(-1);
 }
+
+
 
 DeviceManager dm;
-static InputDebugger i_debugger;
-
-bool ui_prompt(std::string output) {
-    auto fut = ui.prompt_user_async(output);
-    bool accepted = fut.get(); // wait till callback
-    if (accepted) {
-        return true;
-    } else {
-        return false;
-    }
-
-// std::thread t([ui = &ui_, fe = fm_, output ]{ // bricks ui
-//     auto fut = ui->prompt_user_async(output);
-//     bool accepted = fut.get(); // blocks thread until UI responds
-//     if (accepted) {
-//         return true;
-//     } else {
-//         return false;
-//     }
-// });
-//     t.detach();
-    // return false;
-}
-
-std::string ui_prompt_str(std::string output) {
-    auto fut = ui.prompt_user_async_string(output);
-    return fut.get();
-    // std::string value = fut.get();
-    // if (value.empty()) {
-    //     return NULL;
-    // } else {
-    //     return value;
-    // }
-}
-
+// static InputDebugger i_debugger;
 
 int SpeechToText::Initialize() {
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
     Logger::GetInstance().log("\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n\n");
-    // initialize vosk api
+
     vosk_set_log_level(0);
-    
+
     model = vosk_model_new(cfg.get<std::string>("voskapi_model_path", "./model").c_str());
     if (!model) {
         std::cerr << "[ERROR] Failed to load Vosk-API model from \"" << cfg.get<std::string>("voskapi_model_path", "./model") << "\"!" << std::endl;
@@ -695,78 +630,65 @@ int SpeechToText::Initialize() {
     Logger::GetInstance().log("[INFO] Successfully loaded the Vosk-API model from \"");
     Logger::GetInstance().log(cfg.get<std::string>("voskapi_model_path", "./model"));
     Logger::GetInstance().log("\"!\n");
-    // initialize portaudio
-    if (Pa_Initialize() != paNoError) {
-        std::cout << "[ERROR] PortAudio Initialization error!" << std::endl;
-        Logger::GetInstance().log("[ERROR] PortAudio Initialization error!\n");
-        std::exit(EXIT_FAILURE);
-    }
-    std::cout << "[INFO] Successfully initialized PortAudio!" << std::endl;
-    Logger::GetInstance().log("[INFO] Successfully initialized PortAudio!\n");
 
-    // dm.enumerateDevices();
-    // PaDeviceIndex dev = dm.pickDefault();
+    // enumerate and let user pick via RtAudio-based DeviceManager
     dm.enumerateDevices();
-    PaDeviceIndex dev = SelectInputDeviceWithPrompt(dm);
-    if (dev == paNoDevice) {
-        std::cerr << "[ERROR] No input device selected/found!" << std::endl;
-        Pa_Terminate();
+    unsigned int dev = dm.pickDefault();
+    // unsigned int dev = SelectInputDeviceWithPrompt(dm);
+    if (dev == static_cast<unsigned int>(-1)) {
+        std::cerr << "[ERROR] No input device selected!" << std::endl;
+        Logger::GetInstance().log("[ERROR] No input device selected!\n");
         return 1;
     }
-    if (dev == paNoDevice) {
-        std::cerr << "[ERROR] No default input device found!" << std::endl;
-        Logger::GetInstance().log("[ERROR] No default input device found!\n");
-        Pa_Terminate();
+
+    // query device info from RtAudio
+    RtAudio::DeviceInfo devInfo;
+    try {
+        devInfo = dm.dac.getDeviceInfo(dev);
+    } catch (const std::exception &e) {
+        std::cerr << "[ERROR] getDeviceInfo failed for selected device: " << e.what() << std::endl;
         return 1;
     }
-    const PaDeviceInfo *devInfo = Pa_GetDeviceInfo(dev);
-    sampleRate = devInfo->defaultSampleRate;
+
+    sampleRate = (devInfo.preferredSampleRate > 0) ? static_cast<double>(devInfo.preferredSampleRate) : 48000.0;
 
     // small buffer -> low latency
-    framesPerBuffer =  int(sampleRate * cfg.get<double>("buffer_factor", 0.05));
+    framesPerBuffer = static_cast<unsigned int>( sampleRate * cfg.get<double>("buffer_factor", 0.05) );
+    if (framesPerBuffer == 0) framesPerBuffer = 512;
     std::cout << "[INFO] Buffer factor has been set to  \"" << cfg.get<double>("buffer_factor", 0.05) << "\"." << std::endl;
     Logger::GetInstance().log("[INFO] Buffer factor has been set to  \"");
-    Logger::GetInstance().log(cfg.get<std::string>("buffer_factor", "0.05"));
+    Logger::GetInstance().log(std::to_string(cfg.get<double>("buffer_factor", 0.05)));
     Logger::GetInstance().log("\".\n");
-    std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
+
+    std::cout << "[INFO] Using input device: " << devInfo.name << " @" << sampleRate << "Hz" << std::endl;
     Logger::GetInstance().log("[INFO] Using input device: ");
-    Logger::GetInstance().log(devInfo->name);
+    Logger::GetInstance().log(devInfo.name);
     Logger::GetInstance().log(" @ ");
     Logger::GetInstance().log(std::to_string(sampleRate));
     Logger::GetInstance().log(" Hz\n");
 
+    // create recognizer
     recognizer = vosk_recognizer_new(model, sampleRate);
     vosk_recognizer_set_max_alternatives(recognizer, 0);
     vosk_recognizer_set_words(recognizer, true);
 
-    dm.openStream(dev, framesPerBuffer, sampleRate);
-    // PaStreamParameters inputParams;
-    // inputParams.device = dev;
-    // inputParams.channelCount = 1;
-    // inputParams.sampleFormat = paInt16;
-    // inputParams.suggestedLatency = devInfo->defaultLowInputLatency;
-    // inputParams.hostApiSpecificStreamInfo = nullptr;
+    // open stream via DeviceManager (RtAudio)
+    if (!dm.openStream(dev, framesPerBuffer, sampleRate)) {
+        std::cerr << "[ERROR] Failed to open stream on selected device\n";
+        return 1;
+    }
 
-    // if (Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate,
-    //                   framesPerBuffer, paNoFlag, nullptr, nullptr) != paNoError) {
-    //     std::cerr << "[INFO] Failed to open stream!" << std::endl;
-    //     Logger::GetInstance().log("[INFO] Failed to open stream!\n");
-    //     return 1;
-    // }
-    // Pa_StartStream(stream);
-    // if (cfg.get<bool>("enable_user_interface", false)) {
-    //     visualizer.Initialize(sampleRate, 2048,2);
-    //     std::cout << "[INFO] Input visualizer has been initialized!" << std::endl;
-    //     Logger::GetInstance().log("[INFO] Input visualizer has been initialized!");
-    // }
-    std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
-    Logger::GetInstance().log("[INFO] Successfully oppened the PortAudio stream!\n");
+    std::cout << "[INFO] Successfully opened the input stream!\n";
+    Logger::GetInstance().log("[INFO] Successfully opened the input stream!\n");
 
-    std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
-    Logger::GetInstance().log("\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n\n");
+    std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSFULLY]───────────────<\n" << std::endl;
+    Logger::GetInstance().log("\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSFULLY]───────────────<\n\n");
+
+    // start main loop
     Run();
     return 0;
 }
+
 
 static void dump_portaudio_devices() {
     int apiCount = Pa_GetHostApiCount();
@@ -803,28 +725,44 @@ int SpeechToText::Run() {
     std::cout << "[INFO] Listening...\n";
     Logger::GetInstance().log("[INFO] Listening...\n");
 
-    if (true) { // toggle debugger
-        i_debugger.start(dm.currentDevice, dm.activeSampleRate, static_cast<int>(dm.framesPerBuffer), "/tmp/mic_dump.wav", 10);
-    }
-
+    // if (true) { // toggle debugger
+    //     i_debugger.start(dm.currentDevice, dm.activeSampleRate, static_cast<int>(dm.framesPerBuffer), "/tmp/mic_dump.wav", 10);
+    // }
+    const unsigned int NO_DEVICE = static_cast<unsigned int>(-1);
     std::vector<int16_t> buffer; // will be filled by dm.readAndProcess
     bool inSpeech = false;
     bool silenceTimerRunning = false;
     auto silenceStart = std::chrono::steady_clock::now();
 
+
     size_t frames_with_nonzero = 0;
     size_t frames_read = 0;
 
+    if (!recognizer) {
+        std::cerr << "[ERROR] recognizer is null - aborting!" << std::endl;
+        return 1;
+    }
+
     while (true) {
         // read buffer (mono int16)
-        bool ok = dm.readAndProcess(buffer, visualizer, recognizer, framesPerBuffer);
+        bool ok = dm.readAndProcess(buffer, visualizer, recognizer, static_cast<size_t>(framesPerBuffer));
         if (!ok) {
-            std::cerr << "[ERROR] stream read failed. re-enumerating devices.\n";
+            std::cerr << "[ERROR] Stream read failed! re-enumerating devices..." << std::endl;
             dm.closeStream();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             dm.enumerateDevices();
-            PaDeviceIndex fallback = dm.pickDefault();
-            if (fallback != paNoDevice) dm.openStream(fallback, framesPerBuffer, sampleRate);
+
+            // pick a fallback device using the device-manager API
+            unsigned int fallback = dm.pickDefault();
+            if (fallback != NO_DEVICE) {
+                if (!dm.openStream(fallback, framesPerBuffer, sampleRate)) {
+                    std::cerr << "[ERROR] Fallback openStream failed for device " << fallback << std::endl;
+                } else {
+                    std::cout << "[INFO] Reopened fallback device " << fallback << std::endl;
+                }
+            } else {
+                std::cerr << "[ERROR] No fallback device available!" << std::endl;
+            }
             continue;
         }
 
@@ -841,7 +779,9 @@ int SpeechToText::Run() {
         if (maxAmp > SILENCE_THRESHOLD) {
             if (!inSpeech) {
                 inSpeech = true;
-                vosk_recognizer_reset(recognizer);
+                // reset recognizer for a new utterance 
+                // TODO: check pointers
+                if (recognizer) vosk_recognizer_reset(recognizer);
             }
             silenceTimerRunning = false;
         } else if (inSpeech) {
@@ -852,11 +792,27 @@ int SpeechToText::Run() {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - silenceStart).count();
             if (elapsed >= SILENCE_TIMEOUT_MS) {
-                j_result = nlohmann::json::parse(vosk_recognizer_final_result(recognizer));
-                if (!j_result["text"].get<std::string>().empty()) {
-                    std::cout << "[INFO] Dispatching \"" << j_result["text"].get<std::string>() << "\"...\n";
-                    TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
+                if (recognizer) {
+                    const char* final_json = vosk_recognizer_final_result(recognizer);
+                    if (final_json) {
+                        try {
+                            auto j = nlohmann::json::parse(final_json);
+                            std::string txt;
+                            if (j.contains("text")) txt = j["text"].get<std::string>();
+                            if (!txt.empty()) {
+                                std::cout << "[INFO] Dispatching \"" << txt << "\"..." << std::endl;
+                                TextToSpeech::Verbalize(txt.c_str());
+                            }
+                        } catch (const std::exception &e) {
+                            std::cerr << "[ERROR] Failed to parse recognizer final result: " << e.what() << std::endl;
+                        }
+                    } else {
+                        std::cerr << "[ERROR] vosk_recognizer_final_result returned null" << std::endl;
+                    }
+                } else {
+                    std::cerr << "[ERROR] Recognizer was null at final_result stage" << std::endl;
                 }
+
                 inSpeech = false;
                 silenceTimerRunning = false;
             }
@@ -864,7 +820,8 @@ int SpeechToText::Run() {
 
         // health check
         if (frames_read == 200 && frames_with_nonzero == 0) {
-            std::cerr << "[ERROR] no non-zero samples captured in first ~" << (200 * framesPerBuffer) << " frames. check mic, routing, mute.\n";
+            std::cerr << "[ERROR] no non-zero samples captured in first ~" << (200u * static_cast<unsigned int>(framesPerBuffer))
+                      << " samples. check mic, routing, mute." << std::endl;
         }
     }
 

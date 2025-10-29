@@ -6,6 +6,8 @@
 #include <pulse/error.h>
 #include <cstdlib>   // for system() & voice-fail shutdown
 #include <string>
+#include <imgui.h>
+#include <mutex>
 
 pa_simple *pa = nullptr;
 
@@ -150,4 +152,57 @@ int TextToSpeech::SynthCallback(short* wav, int numsamples, espeak_EVENT* events
         }
     }
     return 0;
+}
+
+void TextToSpeech::render() {
+    static char tts_buf[4096] = {0};
+    static std::mutex tts_text_mtx;
+    static std::string tts_input;
+
+    // ImGui::Begin("Text-to-Speech", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+    // rate/pitch/volume controls
+    int rate = Settings::GetInstance().get<int>("speech_rate", 150);
+    if (ImGui::SliderInt("rate", &rate, 80, 400)) {
+        Settings::GetInstance().set<int>("speech_rate", rate);
+        espeak_SetParameter(espeakRATE, rate, 0);
+    }
+    int pitch = Settings::GetInstance().get<int>("speech_pitch", 50);
+    if (ImGui::SliderInt("pitch", &pitch, 0, 99)) {
+        Settings::GetInstance().set<int>("speech_pitch", pitch);
+        espeak_SetParameter(espeakPITCH, pitch, 0);
+    }
+    int volume = Settings::GetInstance().get<int>("speech_volume", 100);
+    if (ImGui::SliderInt("volume", &volume, 0, 200)) {
+        Settings::GetInstance().set<int>("speech_volume", volume);
+        espeak_SetParameter(espeakVOLUME, volume, 0);
+    }
+
+    // voice selection
+    static char voice_buf[128] = {0};
+    std::string curVoice = Settings::GetInstance().get<std::string>("speech_vociebank", "en-us");
+    if (voice_buf[0] == '\0') strncpy(voice_buf, curVoice.c_str(), sizeof(voice_buf)-1);
+    if (ImGui::InputText("voicebank", voice_buf, sizeof(voice_buf))) {
+        // apply when changed
+        if (espeak_SetVoiceByName(voice_buf) == EE_OK) {
+            Settings::GetInstance().set<std::string>("speech_vociebank", std::string(voice_buf));
+        }
+    }
+
+    // text input & speak button
+    ImGui::Spacing();
+    ImGui::Text("Manual voice output");
+    ImGui::InputTextMultiline("##text", tts_buf, sizeof(tts_buf), ImVec2(ImGui::GetColumnWidth(), ImGui::GetFrameHeight()-132));
+
+    ImGui::SetCursorPosX(ImGui::GetColumnWidth()-100);
+    if (ImGui::Button("Clear")) {
+        tts_buf[0] = '\0';
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Speak")) {
+        std::lock_guard<std::mutex> lk(tts_text_mtx);
+        if (tts_buf[0] != '\0') TextToSpeech::Verbalize(tts_buf);
+    }
+
+    // ImGui::End();
 }

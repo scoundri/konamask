@@ -3,10 +3,10 @@ CXX       := g++
 PKG_CONFIG:= pkg-config
 
 # --- flags ---------------------------------------------------------
-CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags espeak-ng portaudio-2.0 sdl2 libpulse-simple gtk+-3.0 appindicator3-0.1 rtaudio)
+CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags espeak-ng portaudio-2.0 sdl2 libpulse-simple gtk+-3.0 appindicator3-0.1)
 CXXFLAGS += -Iinclude -I/usr/include/glib-2.0 -I/usr/include/gtk-3.0
 
-LDFLAGS   := $(shell $(PKG_CONFIG) --libs espeak-ng portaudio-2.0 sdl2 libpulse-simple gtk+-3.0 appindicator3-0.1 rtaudio)
+LDFLAGS   := $(shell $(PKG_CONFIG) --libs espeak-ng portaudio-2.0 sdl2 libpulse-simple gtk+-3.0 appindicator3-0.1)
 LDFLAGS  += -lvosk -pthread -limgui -lvulkan -lcurl
 
 # --- directories ---------------------------------------------------

@@ -10,6 +10,7 @@ public:
     static void Verbalize(const char* TEXT);
     void Shutdown();
     static int SynthCallback(short* wav, int numsamples, espeak_EVENT* events);
+    static void render();
 private:
     unsigned int samplerate;
 };

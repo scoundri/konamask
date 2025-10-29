@@ -21,12 +21,18 @@
 class SpeechToText {
 public:
     int Initialize();
+    void render();
+    bool ReopenStream(PaDeviceIndex device=paNoDevice);
+    void Shutdown();
 private:
     Settings& cfg = Settings::GetInstance();
 
     // silence detection settings
     #define SILENCE_THRESHOLD cfg.get<int>("silence_threshold", 200)       // amplitude threshold
     #define SILENCE_TIMEOUT_MS cfg.get<int>("silence_threshold", 1000)     // required silence duration to finalize
+
+    std::atomic<bool> stopRequested{false};
+    PaDeviceIndex selectedDevice = paNoDevice;
 
     VoskModel *model;
     VoskRecognizer *recognizer;
@@ -45,7 +51,7 @@ public:
     bool Initialize(int sampleRate, int fftSize = 2048, int ringBufferSeconds = 2);
     void PushSamples(const int16_t* samples, size_t count);
     void Process();
-    void render();
+    void render(Settings *cfg);
 
     void setSmoothing(float alpha) { smoothingAlpha = alpha; }
     void setGain(float g) { gain = g; }
@@ -95,3 +101,4 @@ private:
 };
 
 extern InputVisualizer visualizer;
+extern SpeechToText stt;

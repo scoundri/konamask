@@ -440,8 +440,23 @@ void InputVisualizer::Process() {
     }
 }
 
-void InputVisualizer::render() {
+void InputVisualizer::render(Settings* cfg) {
     // frequency spectrum
+    static float tcr;
+    static float tcg;
+    static float tcb;
+    // validate range
+    auto in_range = [](int v){ return (v >= 0 && v <= 255); };
+    if (!in_range(cfg->get<int>("ui_theme_red",   50)) || !in_range(cfg->get<int>("ui_theme_green", 20)) || !in_range(cfg->get<int>("ui_theme_blue",  60))) {
+        std::cerr << "[ERROR] Color parse/validation failed, reverting to defaults." << std::endl;
+        Logger::GetInstance().log("[ERROR] Color parse/validation failed, reverting to defaults.\n");
+        tcr = static_cast<float>(50); tcg = static_cast<float>(20); tcb = static_cast<float>(60);
+    } 
+    else {
+        tcr = static_cast<float>(cfg->get<int>("ui_theme_red",   167));
+        tcg = static_cast<float>(cfg->get<int>("ui_theme_green", 42));
+        tcb = static_cast<float>(cfg->get<int>("ui_theme_blue",  92));
+    }
     ImGui::Text("spectrum");
     {
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -458,7 +473,7 @@ void InputVisualizer::render() {
             float v = spectrumSmoothed[i];
             float y = p.y + sz.y * (1.0f - v);
             // draw bar
-            dl->AddRectFilled(ImVec2(x0, y), ImVec2(x1, p.y + sz.y), IM_COL32(80,160,220,200));
+            dl->AddRectFilled(ImVec2(x0, y), ImVec2(x1, p.y + sz.y), IM_COL32(tcr,tcg,tcb,200));
             // draw peak line in different color
             float peakNorm = (peakHold[i] - minDb) / (maxDb - minDb);
             if (peakNorm < 0.0f) peakNorm = 0.0f;
@@ -483,6 +498,134 @@ void InputVisualizer::render() {
 
     // simple frequency readout under cursor
     ImGui::Text("fft size %d, sr %d, bin width %.2f Hz", N, sr, sr / (float)N);
+}
+
+static int selected_pa_device = -1;
+static bool pa_devices_populated = false;
+static std::vector<std::string> pa_device_labels;
+static std::vector<int> pa_device_indices;
+
+static void populate_pa_device_list() {
+    pa_device_labels.clear();
+    pa_device_indices.clear();
+    int n = Pa_GetDeviceCount();
+    if (n < 0) {
+        pa_devices_populated = false;
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        const PaDeviceInfo *di = Pa_GetDeviceInfo(i);
+        if (!di) continue;
+        if (di->maxInputChannels <= 0) continue;
+        pa_device_labels.push_back(std::to_string(i) + ": " + std::string(di->name));
+        pa_device_indices.push_back(i);
+    }
+    pa_devices_populated = true;
+}
+
+void SpeechToText::render() {
+
+    ImGui::BeginChild("##title_header_stt", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::SetCursorPosX(16);
+    ImGui::SetCursorPosY(20.8f);
+    ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT MANAGEMENT");
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 220);
+    ImGui::SetCursorPosY(13.5f);
+    if (ImGui::Button("Restart backend", ImVec2(100,28))) {
+        if (selected_pa_device >= 0) {
+            if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device))) {
+                std::cerr << "[ERROR] Restart input failed!" << std::endl;
+            }
+        } else {
+            if (!ReopenStream(paNoDevice)) {
+                std::cerr << "[ERROR] Restart input failed!" << std::endl;
+            }
+        }
+    }
+    // if (ImGui::Button("Restart backend", ImVec2(100,28))) {
+    //     if (selected_pa_device >= 0) {
+    //         if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device))) {
+    //             std::cerr << "[ERROR] Restart input failed!" << std::endl;
+    //         }
+    //     } else {
+    //         if (!ReopenStream(paNoDevice)) {
+    //             std::cerr << "[ERROR] Restart input failed!" << std::endl;
+    //         }
+    //     }
+    // }
+    // ImGui::SameLine();
+    // ImGui::SetCursorPosY(13.5f);
+    // if (stopRequested.load()) {
+    //     if (ImGui::Button("Start backend", ImVec2(100,28))) {
+    //         if (ReopenStream()) {
+    //             Run();
+    //         } else {
+    //             std::cout << "[ERROR] Failed to start Speech-To-Text backend (could not re-open stream)!" << std::endl;
+    //         }
+    //     }
+    // } else {
+    //     if (ImGui::Button("Stop backend", ImVec2(100,28))) {
+    //         stopRequested.store(true);
+    //     }
+    // }
+    ImGui::EndChild();
+
+    ImGui::BeginChild("##STT_CONF", ImVec2(0, ImGui::GetWindowHeight()-62), true);
+
+    // input device chooser
+    ImGui::SeparatorText("Input Devices");
+    if (ImGui::Button("refresh device list")) {
+        populate_pa_device_list();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("select default")) {
+        PaDeviceIndex def = Pa_GetDefaultInputDevice();
+        selected_pa_device = (def == paNoDevice) ? -1 : static_cast<int>(def);
+    }
+    if (!pa_devices_populated) populate_pa_device_list();
+    if (pa_device_labels.empty()) {
+        ImGui::SetCursorPosX(20);
+        ImGui::TextDisabled("No input devices were detected!\nPA not initialized?");
+    } else {
+        // build items for combo
+        static int combo_idx = 0;
+        std::vector<const char*> items;
+        items.reserve(pa_device_labels.size());
+        for (auto &s : pa_device_labels) items.push_back(s.c_str());
+        ImGui::Combo("pa device", &combo_idx, items.data(), static_cast<int>(items.size()));
+        selected_pa_device = pa_device_indices[combo_idx];
+        ImGui::Text("selected device id: %d", selected_pa_device);
+    }
+    
+
+    ImGui::Dummy(ImVec2(0,20));
+
+    // voice activity detection parameters
+    ImGui::SeparatorText("VAD / STT params");
+    int conf_threshold = cfg.get<int>("silence_threshold", 200);
+    int conf_timeout = cfg.get<int>("silence_timeout", 1000);
+    double buffactor = cfg.get<double>("buffer_factor", 0.05);
+    if (ImGui::SliderInt("silence threshold", &conf_threshold, 1, 30000)) {
+        cfg.set<int>("silence_threshold", conf_threshold);
+    }
+    if (ImGui::SliderInt("silence timeout ms", &conf_timeout, 100, 5000)) {
+        cfg.set<int>("silence_timeout", conf_timeout);
+    }
+    if (ImGui::InputDouble("buffer factor", &buffactor)) {
+        if (buffactor <= 0.0) buffactor = 0.01;
+        cfg.set<double>("buffer_factor", buffactor);
+    }
+    ImGui::Text("Current framesPerBuffer: %d", framesPerBuffer);
+
+    if (ImGui::Button("Apply buffer (restart backend)")) {
+        if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device >= 0 ? selected_pa_device : paNoDevice))) {
+            std::cerr << "[ERROR] Failed to apply buffer change\n";
+        }
+    }
+
+    ImGui::EndChild();
+
 }
 
 
@@ -1551,7 +1694,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     style.Colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.20f, 0.22f, 0.27f, 0.75f);
     style.Colors[ImGuiCol_TitleBgActive]         = ImVec4(tcr, tcg, tcb, 0.86f);
     // style.Colors[ImGuiCol_MenuBarBg]             = ImVec4(0.20f, 0.22f, 0.27f, 0.47f);
-    // style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.20f, 0.22f, 0.27f, 0.00f);
+    style.Colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.0f, 0.0f, 0.0f, 0.00f);
     // style.Colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.09f, 0.15f, 0.16f, 0.86f);
     style.Colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(tcr, tcg, tcb, 0.36f);
     style.Colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(tcr, tcg, tcb, 0.86f);
@@ -2062,65 +2205,43 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (visualizer.initialized) {
             ImGui::SetCursorPosY(44.0f);
             ImGui::Separator();
-            visualizer.render();
+            visualizer.render(&cfg);
         } else {
             ImGui::SetCursorPosY(44.0f);
             ImGui::Separator();
-            ImGui::SetCursorPosX(ImGui::GetColumnWidth()/2-ImGui::CalcTextSize("Initializing graphs").x);
+            ImGui::SetCursorPosX(ImGui::GetColumnWidth()/2-ImGui::CalcTextSize("Initializing graphs").x/2);
             ImGui::SetCursorPosY(fb_height/2.5f+10.0f);
             ImGui::Text("Initializing graphs...");
         }
         ImGui::EndChild();
         ImGui::SameLine();
 
-        ImGui::BeginChild("DMCenter", ImVec2( sidebar_size, 0), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("##CONF", ImVec2( sidebar_size, 0), false, ImGuiWindowFlags_NoScrollbar);
         switch (c_tab) {
             case OVERVIEW_TAB:
-
-                // header (contact name centered left, actions right)
-                ImGui::BeginChild("DMHeader", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
-                ImGui::SetCursorPosX(20.0f);
-                ImGui::SetCursorPosY(20.0f);
-                ImGui::SameLine();
-                // ImGui::SetCursorPosY(12.0f);
-                // ImGui::TextDisabled(" - online"); add when status fetching is added
-
-                // right aligned actions
-                ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 220);
-                ImGui::SetCursorPosY(13.5f);
-                if (ImGui::Button("Call", ImVec2(100,28))) {}
-                ImGui::SameLine();
-                ImGui::SetCursorPosY(13.5f);
-                if (ImGui::Button("Info", ImVec2(100,28))) {}
-                ImGui::EndChild();
-
-                // messages viewport
-                ImGui::BeginChild("DMMessages", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), true);
-                ImGui::PushFont(f_iconData);
-                ImGui::Text("");
-                ImGui::PopFont();
-                // ImDrawList* dl_main = ImGui::GetWindowDrawList();
-                // ImGuiStyle& style = ImGui::GetStyle();
-
-                // float content_width = ImGui::GetContentRegionAvail().x;
-                // float max_bubble_w = std::max(64.0f, content_width * 0.75f);
-
-                ImGui::EndChild();
+                stt.render();
             break;
 
             case MANUAL_INPUT_TAB:
-                ImGui::SetCursorPosX(20.0f);
-                ImGui::SetCursorPosY(0.0f);
-                ImGui::BeginChild("Manual Input Tab", ImVec2(0, ImGui::GetWindowHeight()), true, ImGuiWindowFlags_NoBackground);
+                ImGui::BeginChild("##title_header_tts", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
+                ImGui::SetCursorPosX(16);
+                ImGui::SetCursorPosY(20.8f);
+                ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT MANAGEMENT");
+                ImGui::EndChild();
+
+                ImGui::BeginChild("Manual Input Tab", ImVec2(0, ImGui::GetWindowHeight()-62), true);
+
                 ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(20.0f);
                 ImGui::PushFont(f_iconData); 
                 ImGui::Text("I");
                 ImGui::PopFont(); ImGui::SameLine();
                 ImGui::SetCursorPosY(20.0f); ImGui::SetCursorPosX(40.0f);
-                ImGui::Text("Manual voice output:");
-                ImGui::InputTextMultiline("##Input", (char*)&manInput, IM_ARRAYSIZE(manInput), ImVec2(ImGui::GetWindowWidth()-40.0f, ImGui::GetWindowHeight()/2.8f));
-                ImGui::SetCursorPosX(ImGui::GetWindowWidth()-230.0f);
-                if (ImGui::Button("Speak through the microphone", ImVec2(200.0f,34.0f))) TextToSpeech::Verbalize((char*)&manInput);
+                ImGui::Text("Generated voice parameters:");
+                TextToSpeech::render();
+
+                // ImGui::InputTextMultiline("##Input", (char*)&manInput, IM_ARRAYSIZE(manInput), ImVec2(ImGui::GetWindowWidth()-40.0f, ImGui::GetWindowHeight()/2.8f));
+                // ImGui::SetCursorPosX(ImGui::GetWindowWidth()-230.0f);
+                // if (ImGui::Button("Speak through the microphone", ImVec2(200.0f,34.0f))) TextToSpeech::Verbalize((char*)&manInput);
                 ImGui::EndChild();
             break;
 
@@ -2288,6 +2409,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             break;
 
             case DEBUG_TAB:
+                ImGui::SetNextWindowBgAlpha(0.0f);
                 ImGui::SetNextWindowPos(ImVec2(fb_width/2.0f+20.0f, 63.0f));
                 ImGui::SetNextWindowSize(ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()));
                 ImGui::ShowDebugLogWindow();

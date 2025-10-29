@@ -366,6 +366,7 @@ int main() {
 
         tts.Initialize();
         stt.Initialize();  
+        stt.Shutdown();
         tts.Shutdown(); // fix konamask (virt input) not destroying
         try {
             if (uiThread.joinable()) {

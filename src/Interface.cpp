@@ -228,18 +228,15 @@ private:
 
 // audio input stream
 InputVisualizer::InputVisualizer()
-    : ringMask(0),
-      writeIndex(0),
-      readIndex(0),
-      sr(0),
-      N(0),
-      halfN(0),
-      gain(1.0f),
-      smoothingAlpha(0.6f),
-      peakDecayPerSec(12.0f), // dB per second
-      minDb(-90.0f),
-      maxDb(0.0f) {
-}
+    : ring(), ringMask(0), writeIndex(0), readIndex(0),
+      sr(0), N(0), halfN(0),
+      tw_re(), tw_im(), win(), fft_re(), fft_im(),
+      spectrum(), waveform(), spectrumSmoothed(), peakHold(),
+      lastPeakDecay(std::chrono::steady_clock::now()),
+      gain(1.0f), smoothingAlpha(0.6f), peakDecayPerSec(12.0f),
+      minDb(-90.0f), maxDb(0.0f),
+      tmp_re(), tmp_im()
+{}
 
 InputVisualizer::~InputVisualizer() {}
 
@@ -445,7 +442,7 @@ void InputVisualizer::Process() {
 
 void InputVisualizer::render() {
     // frequency spectrum
-    ImGui::Text("spectrum (frequency)");
+    ImGui::Text("spectrum");
     {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -469,7 +466,7 @@ void InputVisualizer::render() {
             float py = p.y + sz.y * (1.0f - peakNorm);
             dl->AddLine(ImVec2(x0, py), ImVec2(x1, py), IM_COL32(255,140,80,220), 1.0f);
         }
-        ImGui::Dummy(sz);
+        ImGui::Dummy(ImVec2(ImGui::GetColumnWidth(), 12.0f));
     }
     // controls
     ImGui::PushItemWidth(-1);
@@ -479,17 +476,14 @@ void InputVisualizer::render() {
     ImGui::PopItemWidth();
 
     // waveform
-    ImGui::Text("waveform (time domain)");
+    ImGui::Text("waveform");
     {
-        ImGui::PlotLines("##plot_lines", waveform.data(), waveform.size(), 0, nullptr, -1.0f, 1.0f, ImVec2(0, 80));
+        ImGui::PlotLines("##plot_lines", waveform.data(), waveform.size(), 0, nullptr, -1.0f, 1.0f, ImVec2(ImGui::GetColumnWidth(), 80));
     }
 
-
     // simple frequency readout under cursor
-    // ImGui::Text("notes: fft size %d, sr %d, bin width %.2f Hz", N, sr, sr / (float)N);
+    ImGui::Text("fft size %d, sr %d, bin width %.2f Hz", N, sr, sr / (float)N);
 }
-
-static InputVisualizer g_InputVis;
 
 
 static void check_vk_result(VkResult err) {
@@ -2061,21 +2055,21 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PopItemWidth();
         ImGui::EndChild();
 
-        // contacts column
-        ImGui::BeginChild("Controls", ImVec2(fb_width/2.0, 0), true);
-        
-        // ImGui::BeginGroup();
-        // ImGui::SetCursorPosY(20.0f);
-
-        // ImGui::TextUnformatted("Direct Messages");
-        // ImGui::CalcTextSize("Direct Messages");
-
-        // ImGui::EndGroup();
-        g_InputVis.Process();
-        g_InputVis.render();
-
-        ImGui::Separator();
-
+        ImGui::BeginChild("##Visualisation", ImVec2(fb_width/2.0, 0), true);
+        ImGui::SetCursorPosY(16.0f);
+        ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT VISUALIZATION");
+        visualizer.Process();
+        if (visualizer.initialized) {
+            ImGui::SetCursorPosY(44.0f);
+            ImGui::Separator();
+            visualizer.render();
+        } else {
+            ImGui::SetCursorPosY(44.0f);
+            ImGui::Separator();
+            ImGui::SetCursorPosX(ImGui::GetColumnWidth()/2-ImGui::CalcTextSize("Initializing graphs").x);
+            ImGui::SetCursorPosY(fb_height/2.5f+10.0f);
+            ImGui::Text("Initializing graphs...");
+        }
         ImGui::EndChild();
         ImGui::SameLine();
 

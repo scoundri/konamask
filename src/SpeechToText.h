@@ -50,39 +50,39 @@ public:
     void setSmoothing(float alpha) { smoothingAlpha = alpha; }
     void setGain(float g) { gain = g; }
 
+    int getSampleRate() const { return sr; }
+    int getFFTSize() const { return N; }
+    bool initialized=false;
 private:
     std::vector<int16_t> ring;
-    size_t ringMask;
-    std::atomic<uint64_t> writeIndex; // absolute sample index
-    std::atomic<uint64_t> readIndex;  // absolute sample index
+    size_t ringMask = 0;
+    std::atomic<uint64_t> writeIndex;
+    std::atomic<uint64_t> readIndex;
 
-    
-    int sr; // fft state
-    int N;  // fft size
-    int halfN;
-    std::vector<double> tw_re, tw_im;   // twiddle factors
-    std::vector<double> win;            // window function
-    std::vector<double> fft_re, fft_im; // temp arrays
+    int sr = 0; // fft state
+    int N = 0;  // fft size
+    int halfN = 0;
+    std::vector<double> tw_re, tw_im;
+    std::vector<double> win;
+    std::vector<double> fft_re, fft_im; // temporary
 
     // output buffers for display
-    std::vector<float> spectrum; // magnitude-dB or normalized
+    std::vector<float> spectrum; // magnitude normalized
     std::vector<float> waveform; // last waveform
     std::vector<float> spectrumSmoothed;
     std::vector<float> peakHold;
     std::chrono::steady_clock::time_point lastPeakDecay;
 
     // ui parameters
-    float gain;             // applied to incoming signal for display
-    float smoothingAlpha;
-    float peakDecayPerSec;  // dB per sec
-    float minDb, maxDb;
+    float gain = 1.0f;             // applied to incoming signal for display
+    float smoothingAlpha = 0.6f;
+    float peakDecayPerSec = 12.0f;  // dB per sec
+    float minDb = -90.0f, maxDb = 0.0f;
 
     // temporary storage
     std::vector<double> tmp_re, tmp_im;
 
-    // helper methods
     void prepareTwiddles();
-    void computeFFT();
     void inplaceFFT(std::vector<double>& re, std::vector<double>& im);
     inline void writeRing(const int16_t* src, size_t n);
     inline size_t availableSamples() const;
@@ -93,3 +93,5 @@ private:
         return 0.5 * (1.0 - std::cos(2.0 * M_PI * x / (N - 1)));
     }
 };
+
+extern InputVisualizer visualizer;

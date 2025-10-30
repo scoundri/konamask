@@ -72,39 +72,58 @@ int SpeechToText::Initialize() {
     }
 
     std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
-    Run();
+    Start();
     return 0;
 }
 
-bool SpeechToText::ReopenStream(PaDeviceIndex device) {
-    PaDeviceIndex dev = (device != paNoDevice) ? device : selectedDevice;
-    if (dev == paNoDevice) dev = Pa_GetDefaultInputDevice();
-    if (dev == paNoDevice) {
-        std::cerr << "[ERROR] ReopenStream: no input device available!" << std::endl;
-        return false;
+void SpeechToText::Start() {
+    if (workerRunning.exchange(true)) {
+        return;
     }
 
-    const PaDeviceInfo *devInfo = Pa_GetDeviceInfo(dev);
-    if (!devInfo) {
-        std::cerr << "[ERROR] ReopenStream: Pa_GetDeviceInfo returned null!" << std::endl;
-        return false;
+    if (workerThread.joinable()) {
+        try {
+            workerThread.join();
+        } catch (...) {
+        }
     }
 
-    // stop & close existing stream if open
+    try {
+        workerThread = std::thread(&SpeechToText::WorkerLoop, this);
+    } catch (...) {
+        try {
+            WorkerLoop();
+        } catch (...) { 
+            workerRunning.store(false);
+            Shutdown();
+            throw "worker thread (SpeechToText::workerThread) threw inside SpeechToText::Start()";
+        }
+    }
+}
+
+bool SpeechToText::ReopenInputStream() {
+    std::lock_guard<std::mutex> lk(streamMutex);
+
+    // close existing
     if (stream) {
-        PaError e = Pa_IsStreamActive(stream);
-        if (e == 1) Pa_StopStream(stream);
+        Pa_StopStream(stream);
         Pa_CloseStream(stream);
         stream = nullptr;
     }
 
-    // store selection
-    selectedDevice = dev;
-    sampleRate = devInfo->defaultSampleRate;
+    PaDeviceIndex dev = Pa_GetDefaultInputDevice();
+    if (dev == paNoDevice) {
+        std::cerr << "[ERROR] reopenInputStream: no default input device!" << std::endl;
+        return false;
+    }
+    const PaDeviceInfo* devInfo = Pa_GetDeviceInfo(dev);
+    if (!devInfo) {
+        std::cerr << "[ERROR] reopenInputStream: Pa_GetDeviceInfo returned null!" << std::endl;
+        return false;
+    }
 
-    // recompute frames based on buffer_factor
-    framesPerBuffer = int(sampleRate * cfg.get<double>("buffer_factor", 0.05));
-    if (framesPerBuffer <= 0) framesPerBuffer = 256; // fallback
+    // ensure framesPerBuffer is reasonable
+    if (framesPerBuffer <= 0) framesPerBuffer = 512;
 
     PaStreamParameters inputParams;
     inputParams.device = dev;
@@ -113,96 +132,349 @@ bool SpeechToText::ReopenStream(PaDeviceIndex device) {
     inputParams.suggestedLatency = devInfo->defaultLowInputLatency;
     inputParams.hostApiSpecificStreamInfo = nullptr;
 
-    PaError err = Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate, framesPerBuffer, paNoFlag, nullptr, nullptr);
+    PaError err = Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate,
+                               static_cast<unsigned long>(framesPerBuffer),
+                               paNoFlag, nullptr, nullptr);
     if (err != paNoError) {
-        std::cerr << "[ERROR] ReopenStream: Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
+        std::cerr << "[ERROR] ReopenInputStream: Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
         stream = nullptr;
         return false;
     }
+
     err = Pa_StartStream(stream);
     if (err != paNoError) {
-        std::cerr << "[ERROR] ReopenStream: Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
+        std::cerr << "[ERROR] ReopenInputStream: Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
         Pa_CloseStream(stream);
         stream = nullptr;
         return false;
     }
 
-    std::cout << "[INFO] ReopenStream: opened device: " << devInfo->name << " @ " << sampleRate << " Hz (frames=" << framesPerBuffer << ")" << std::endl;
-    stopRequested.store(false);
+    std::cout << "[INFO] ReopenInputStream: opened device '" << (devInfo->name ? devInfo->name : "unknown")
+              << "' sr=" << sampleRate << " frames=" << framesPerBuffer << std::endl;
+    return true;
+}
+
+static bool testDeviceOpenAndRead(PaDeviceIndex dev, unsigned long framesPerBuffer, double requestedSampleRate) {
+    PaStream *tmp = nullptr;
+    const PaDeviceInfo *di = Pa_GetDeviceInfo(dev);
+    if (!di) return false;
+
+    PaStreamParameters inParams;
+    std::memset(&inParams, 0, sizeof(inParams));
+    inParams.device = dev;
+    inParams.channelCount = 1;
+    inParams.sampleFormat = paInt16; // test int16 first
+    inParams.suggestedLatency = di->defaultLowInputLatency;
+    inParams.hostApiSpecificStreamInfo = nullptr;
+
+    // reasonable sr
+    double sr = (requestedSampleRate > 0.0) ? requestedSampleRate : di->defaultSampleRate;
+    if (sr <= 0) sr = 48000.0;
+
+    // open/read as int16
+    PaError err = Pa_OpenStream(&tmp, &inParams, nullptr, sr, framesPerBuffer, paNoFlag, nullptr, nullptr);
+    if (err == paNoError) {
+        err = Pa_StartStream(tmp);
+        if (err == paNoError) {
+            std::vector<int16_t> buf(framesPerBuffer);
+            PaError r = Pa_ReadStream(tmp, buf.data(), framesPerBuffer);
+            // close
+            Pa_StopStream(tmp);
+            Pa_CloseStream(tmp);
+            tmp = nullptr;
+            if (r == paNoError || r == paInputOverflowed) return true;
+            // fallthrough to float
+        } else {
+            Pa_CloseStream(tmp);
+            tmp = nullptr;
+        }
+    }
+
+    // float32 fallback
+    inParams.sampleFormat = paFloat32;
+    err = Pa_OpenStream(&tmp, &inParams, nullptr, sr, framesPerBuffer, paNoFlag, nullptr, nullptr);
+    if (err != paNoError) {
+        if (tmp) { Pa_CloseStream(tmp); tmp = nullptr; }
+        return false;
+    }
+    err = Pa_StartStream(tmp);
+    if (err != paNoError) {
+        Pa_CloseStream(tmp);
+        return false;
+    }
+    {
+        std::vector<float> fb(framesPerBuffer);
+        PaError r = Pa_ReadStream(tmp, fb.data(), framesPerBuffer);
+        Pa_StopStream(tmp);
+        Pa_CloseStream(tmp);
+        tmp = nullptr;
+        return (r == paNoError || r == paInputOverflowed);
+    }
+}
+
+static PaDeviceIndex findWorkingDeviceAuto(unsigned long framesPerBuffer, double requestedSampleRate) {
+    int devCount = Pa_GetDeviceCount();
+    if (devCount < 0) return paNoDevice;
+
+    // try system default
+    PaDeviceIndex def = Pa_GetDefaultInputDevice();
+    if (def != paNoDevice && testDeviceOpenAndRead(def, framesPerBuffer, requestedSampleRate)) {
+        return def;
+    }
+
+    for (int i = 0; i < devCount; ++i) {
+        const PaDeviceInfo* di = Pa_GetDeviceInfo(i);
+        if (!di) continue;
+        if (di->maxInputChannels <= 0) continue;
+        if (static_cast<PaDeviceIndex>(i) == def) continue;
+        if (testDeviceOpenAndRead(static_cast<PaDeviceIndex>(i), framesPerBuffer, requestedSampleRate)) {
+            return static_cast<PaDeviceIndex>(i);
+        }
+    }
+    return paNoDevice;
+}
+
+bool SpeechToText::SwitchToDevice(PaDeviceIndex newDev) {
+    if (newDev == paNoDevice) return false;
+    std::lock_guard<std::mutex> lk(streamMutex);
+    // close old stream
+    if (stream) {
+        Pa_StopStream(stream);
+        Pa_CloseStream(stream);
+        stream = nullptr;
+    }
+
+    const PaDeviceInfo *di = Pa_GetDeviceInfo(newDev);
+    if (!di) return false;
+    sampleRate = di->defaultSampleRate;
+
+    // open stream
+    PaStreamParameters inParams;
+    inParams.device = newDev;
+    inParams.channelCount = 1;
+    inParams.sampleFormat = paInt16;
+    inParams.suggestedLatency = di->defaultLowInputLatency;
+    inParams.hostApiSpecificStreamInfo = nullptr;
+
+    PaError err = Pa_OpenStream(&stream, &inParams, nullptr, sampleRate,
+                               static_cast<unsigned long>(framesPerBuffer), paNoFlag, nullptr, nullptr);
+    if (err != paNoError) {
+        std::cerr << "[ERROR] switchToDevice: Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
+        stream = nullptr;
+        return false;
+    }
+    err = Pa_StartStream(stream);
+    if (err != paNoError) {
+        std::cerr << "[ERROR] switchToDevice: Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
+        Pa_CloseStream(stream);
+        stream = nullptr;
+        return false;
+    }
+    std::cout << "[INFO] switched to device '" << (di->name?di->name:"unknown") << "' sr=" << sampleRate << std::endl;
     return true;
 }
 
 
-int SpeechToText::Run() {
-    std::cout << "[INFO] Listening...\n";
+void SpeechToText::Stop() {
+    if (!workerRunning.load()) return;
+    workerRunning.store(false);
+    controlCv.notify_all();
+    if (workerThread.joinable()) workerThread.join();
+}
 
-    std::vector<int16_t> buffer(framesPerBuffer);
-    bool inSpeech = false;
-    bool silenceTimerRunning = false;
-    auto silenceStart = std::chrono::steady_clock::now();
-    visualizer.initialized=true;
+void SpeechToText::SwitchMode(ProcessingMode m) {
+    currentMode.store(m);
+    // wake worker
+    controlCv.notify_one();
+}
 
-    // listen and process
-    while (true) {
-        if (!stopRequested.load()) {
-            std::this_thread::sleep_for(std::chrono::duration<std::chrono::milliseconds>(20));
+void SpeechToText::RequestRestartInput() {
+    restartRequested.store(true);
+    controlCv.notify_one();
+}
+
+void SpeechToText::WorkerLoop() {
+    // local buffers
+    std::vector<int16_t> buffer;
+    buffer.resize(framesPerBuffer);
+
+    std::string lastPartial;
+    size_t lastSpokenCount = 0;
+
+    int backoffMs = 50;
+    const int maxBackoffMs = 5000;
+
+    auto split_words = [](const std::string &s) {
+        std::vector<std::string> w;
+        std::istringstream iss(s);
+        std::string tok;
+        while (iss >> tok) w.push_back(tok);
+        return w;
+    };
+
+    while (workerRunning.load()) {
+        // restart request handling
+        if (restartRequested.load()) {
+            std::unique_lock<std::mutex> lk(streamMutex);
+            if (!stream || Pa_IsStreamActive(stream) <= 0) {
+                lk.unlock();
+                if (!ReopenInputStream()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
+                    backoffMs = std::min(maxBackoffMs, backoffMs * 2);
+                    continue;
+                }
+            backoffMs = 50;
+            }
         }
-        PaError err = Pa_ReadStream(stream, buffer.data(), framesPerBuffer);
-        if (err && err != paInputOverflowed) break;
-        visualizer.PushSamples(buffer.data(), buffer.size());
-
-
-            // voice activity detection
-            int16_t maxAmp = 0;
-            for (auto &s : buffer) maxAmp = std::max<int16_t>(maxAmp, std::abs(s));
-            if (maxAmp > SILENCE_THRESHOLD) {
-                if (!inSpeech) {
-                    inSpeech = true;
-                    vosk_recognizer_reset(recognizer);
-                }
-                silenceTimerRunning = false;
-            } else if (inSpeech) {
-                if (!silenceTimerRunning) {
-                    silenceTimerRunning = true;
-                    silenceStart = std::chrono::steady_clock::now();
-                }
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - silenceStart).count();
-                if (elapsed >= SILENCE_TIMEOUT_MS) {
-                    // finalize utterance
-                    j_result = nlohmann::json::parse(vosk_recognizer_final_result(recognizer));
-                    // debug output
-                    //std::cout << "\n──────────── STT DEBUG ────────────" << std::endl;
-                    //const char* result = vosk_recognizer_final_result(recognizer);
-                    //std::cout << result << std::endl;
-
-                    if (!j_result["text"].get<std::string>().empty()) {
-                        std::cout << "[INFO] Dispatching \"" << j_result["text"].get<std::string>() << "\"..." << std::endl;
-                        TextToSpeech::Verbalize(j_result["text"].get<std::string>().c_str());
-                        std::cout << "[INFO] Dispatched content successfully!" << std::endl;
-                    }
-                    inSpeech = false;
-                    silenceTimerRunning = false;
+        PaError err;
+        {
+            std::lock_guard<std::mutex> lk(streamMutex);
+            if (!stream) { continue; }
+            err = Pa_ReadStream(stream, buffer.data(), static_cast<unsigned long>(framesPerBuffer));
+            if (err && err != paInputOverflowed) {
+            std::cerr << "[ERROR] Pa_ReadStream returned " << err << " (" << Pa_GetErrorText(err) << ")" << std::endl;
+        
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+            // try auto-discovery of a working device
+            PaDeviceIndex wokring = findWorkingDeviceAuto(static_cast<unsigned long>(framesPerBuffer), sampleRate);
+            if (wokring != paNoDevice) {
+                std::cout << "[INFO] Auto-found working device: " << wokring << " - switching..." << std::endl;
+                if (SwitchToDevice(wokring)) {
+                    continue; // attempt next read on new device
+                } else {
+                    std::cerr << "[ERROR] Failed to switch to auto-found device!" << std::endl;
                 }
             }
         
-        // always feed output
-        vosk_recognizer_accept_waveform(recognizer,
-            reinterpret_cast<const char *>(buffer.data()),
-            framesPerBuffer * sizeof(int16_t));
-        
+            }
+        }
+
+
+        visualizer.PushSamples(buffer.data(), buffer.size());
+
+        // dispatch
+        ProcessingMode mode = currentMode.load();
+        if (mode == ProcessingMode::FinalOnSilence) { // call handler
+            ProcessBuffer_Final(buffer);
+        } else {
+            ProcessBuffer_Partial(buffer);
+        }
+        std::unique_lock<std::mutex> lk(streamMutex);
+        controlCv.wait_for(lk, std::chrono::milliseconds(1), [&](){ return !workerRunning.load() || restartRequested.load() || false;});
     }
 
+    // final cleanup
+    {
+        std::unique_lock<std::mutex> lk(streamMutex);
+        if (stream) {
+            Pa_StopStream(stream);
+            Pa_CloseStream(stream);
+            stream = nullptr;
+        }
+    }
+}
 
-    return 0;
+void SpeechToText::ProcessBuffer_Final(const std::vector<int16_t>& buffer) {
+    // feed recognizer
+    vosk_recognizer_accept_waveform(recognizer,
+        reinterpret_cast<const char*>(buffer.data()),
+        static_cast<int>(buffer.size() * sizeof(int16_t)));
+
+    // VAD + final-on-silence
+    static bool inSpeech = false;
+    static auto silenceStart = std::chrono::steady_clock::now();
+    int maxAmp = 0;
+    for (auto s : buffer) maxAmp = std::max(maxAmp, std::abs((int)s));
+
+    if (maxAmp > SILENCE_THRESHOLD) {
+        if (!inSpeech) {
+            inSpeech = true;
+            vosk_recognizer_reset(recognizer); // reset on new speech
+        }
+    } else if (inSpeech) {
+        // start timer or finalize
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - silenceStart).count();
+        if (elapsed >= SILENCE_TIMEOUT_MS) {
+            const char* final_c = vosk_recognizer_final_result(recognizer);
+            if (final_c && final_c[0]) {
+                // parse and speak full text
+                auto j = nlohmann::json::parse(final_c);
+                auto txt = j.value("text", std::string());
+                if (!txt.empty()) {
+                    std::lock_guard<std::mutex> lk(tts_mtx);
+                    TextToSpeech::Verbalize(txt.c_str());
+                }
+            }
+            inSpeech = false;
+        }
+    } else {
+        silenceStart = std::chrono::steady_clock::now();
+    }
+}
+
+void SpeechToText::ProcessBuffer_Partial(const std::vector<int16_t>& buffer) {
+    // feed recognizer
+    vosk_recognizer_accept_waveform(recognizer,
+        reinterpret_cast<const char*>(buffer.data()),
+        static_cast<int>(buffer.size() * sizeof(int16_t)));
+
+    // query partial
+    const char* partial_c = vosk_recognizer_partial_result(recognizer);
+    if (!partial_c || partial_c[0] == '\0') return;
+
+    try {
+        auto pj = nlohmann::json::parse(partial_c);
+        std::string ptxt = pj.value("partial", std::string());
+        // split words
+        static std::vector<std::string> spokenWords;
+        // if ptxt shorter than previous, assume recognizer backtracked -> clear
+        if (ptxt.size() < std::accumulate(spokenWords.begin(), spokenWords.end(), 0,
+                                          [](int a, const std::string &s){ return a + (int)s.size() + 1; })) {
+            spokenWords.clear();
+        }
+        std::istringstream iss(ptxt);
+        std::vector<std::string> words;
+        std::string w;
+        while (iss >> w) words.push_back(w);
+
+        // speak new input (words)
+        size_t already = spokenWords.size();
+        if (words.size() > already) {
+            for (size_t i = already; i < words.size(); ++i) {
+                std::lock_guard<std::mutex> lk(tts_mtx);
+                TextToSpeech::Verbalize(words[i].c_str());
+            }
+            spokenWords = words;
+        }
+    } catch (...) {
+        // ignore errors
+    }
 }
 
 void SpeechToText::Shutdown() {
-    // cleanup
-    Pa_StopStream(stream);
-    Pa_CloseStream(stream);
+    Stop();
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
+        if (stream) {
+            Pa_StopStream(stream);
+            Pa_CloseStream(stream);
+            stream = nullptr;
+        }
+    }
     Pa_Terminate();
-    vosk_recognizer_free(recognizer);
-    vosk_model_free(model);
+    if (recognizer) {
+        vosk_recognizer_free(recognizer);
+        recognizer = nullptr;
+    }
+    if (model) {
+        vosk_model_free(model);
+        model = nullptr;
+    }
+}
 
+SpeechToText::~SpeechToText() {
+    Stop();
+    Shutdown();
 }

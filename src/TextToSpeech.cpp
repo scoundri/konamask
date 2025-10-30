@@ -1,5 +1,7 @@
 #include "TextToSpeech.h"
 #include "Logger.h"
+#include <algorithm>
+#include <fstream>
 #include <cstring>
 #include <portaudio.h>
 #include <pulse/simple.h>
@@ -8,9 +10,71 @@
 #include <string>
 #include <imgui.h>
 #include <mutex>
+#include <vector>
 
 pa_simple *pa = nullptr;
+static constexpr const char* VIRT_MODS_PATH = "/tmp/virt_mods";
 
+static inline void trim_inplace(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch){ return !std::isspace(ch); }));
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), s.end());
+}
+
+static int pactl_load_module_get_id(const std::string &args) {
+    std::string cmd = "pactl load-module " + args + " 2>/dev/null";
+    FILE *fp = popen(cmd.c_str(), "r");
+    if (!fp) return -1;
+    char buf[256];
+    std::string out;
+    while (fgets(buf, sizeof(buf), fp)) out += buf;
+    int rc = pclose(fp);
+    // pclose return value not used; parse out
+    trim_inplace(out);
+    if (out.empty()) return -1;
+    try {
+        int id = std::stoi(out);
+        return id;
+    } catch (...) {
+        return -1;
+    }
+}
+
+static bool pactl_unload_module(int module_id) {
+    if (module_id <= 0) return false;
+    std::string cmd = "pactl unload-module " + std::to_string(module_id) + " 2>/dev/null";
+    int rc = std::system(cmd.c_str());
+    // system() returns -1 on failure to start shell; otherwise status<<8
+    if (rc == -1) return false;
+    int exit_status = WEXITSTATUS(rc);
+    return exit_status == 0;
+}
+
+static void persist_module_id(int module_id) {
+    std::ofstream f(VIRT_MODS_PATH, std::ios::app);
+    if (!f.is_open()) return;
+    f << module_id << "\n";
+    f.close();
+}
+
+static std::vector<int> read_persisted_module_ids() {
+    std::vector<int> out;
+    std::ifstream f(VIRT_MODS_PATH);
+    if (!f.is_open()) return out;
+    std::string line;
+    while (std::getline(f, line)) {
+        trim_inplace(line);
+        if (line.empty()) continue;
+        try {
+            out.push_back(std::stoi(line));
+        } catch (...) { continue; }
+    }
+    f.close();
+    return out;
+}
+
+static void remove_persisted_module_file() {
+    ::unlink(VIRT_MODS_PATH); // ignore errors
+}
 
 extern "C" int SynthCallbackC(short* wav, int numsamples, espeak_EVENT* events) {
     return TextToSpeech::SynthCallback(wav, numsamples, events);
@@ -21,8 +85,26 @@ Settings& cfg = Settings::GetInstance();
     std::cout << "\n>─────────────────────[INITIALIZING TEXT-TO-SPEECH]─────────────────────<\n" << std::endl;
     Logger::GetInstance().log("\n>---------------------[INITIALIZING TEXT-TO-SPEECH]---------------------<\n\n");
     // ensure loopback are loaded
-    system("pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=konamask");
-    system("pactl load-module module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
+    // system("pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=konamask");
+    // system("pactl load-module module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
+
+    // load null sink
+    int id1 = pactl_load_module_get_id("module-null-sink sink_name=VirtualSink sink_properties=device.description=konamask");
+    if (id1 <= 0) {
+        std::cerr << "[ERROR] Failed to load module-null-sink!" << std::endl;
+    } else {
+        persist_module_id(id1);
+        std::cout << "[INFO] loaded null-sink module id=" << id1 << std::endl;
+    }
+
+    // load remap source (virtual microphone), points at VirtualSink.monitor
+    int id2 = pactl_load_module_get_id("module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
+    if (id2 <= 0) {
+        std::cerr << "[ERROR] Failed to load module-remap-source!" << std::endl;
+    } else {
+        persist_module_id(id2);
+        std::cout << "[INFO] Koaded remap-source module id=" << id2 << std::endl;
+    }
 
     // create virtual microphone
     pa_sample_spec ss;
@@ -133,9 +215,28 @@ void TextToSpeech::Verbalize(const char* TEXT) {
 void TextToSpeech::Shutdown() {
     espeak_Synchronize(); // ensure all speech is played before exiting
     espeak_Terminate();
-    system("bash -c 'if [[ -f /tmp/virt_mods ]]; then for id in $(< /tmp/virt_mods); do pactl unload-module \"$id\" || echo \"Warning: failed to unload $id\"; done; rm /tmp/virt_mods; fi'");
-    //pa_simple_drain(pa, &pa_error); TODO: make &pa_error accessible to TextToSpeech
-    pa_simple_free(pa);
+    if (pa) {
+        int pa_err = 0;
+        if (pa_simple_drain(pa, &pa_err) < 0) {
+            std::cerr << "[ERROR] pa_simple_drain failed: " << pa_strerror(pa_err) << std::endl;
+        }
+        pa_simple_free(pa);
+        pa = nullptr;
+    }
+
+    auto ids = read_persisted_module_ids();
+    for (int id : ids) {
+        if (id <= 0) continue;
+        bool ok = pactl_unload_module(id);
+        if (!ok) {
+            std::cerr << "[ERROR] Failed to unload pulse module id=" << id << std::endl;
+        } else {
+            std::cout << "[INFO] unloaded pulse module id=" << id << std::endl;
+        }
+    }
+
+    remove_persisted_module_file();
+
 }
 
 // callback (espeak will call it with raw PCM)

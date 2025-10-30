@@ -1,6 +1,9 @@
 #pragma once
+#include <condition_variable>
 #include <iostream>
+#include <mutex>
 #include <nlohmann/json_fwd.hpp>
+#include <thread>
 #include <vosk_api.h>
 #include <portaudio.h>
 #include <vector>
@@ -18,14 +21,29 @@
 #include <windows.h>
 #endif
 
+enum class ProcessingMode {
+    FinalOnSilence,
+    IncrementalPartial
+};
+
 class SpeechToText {
 public:
+    ~SpeechToText();
     int Initialize();
     void render();
-    bool ReopenStream(PaDeviceIndex device=paNoDevice);
     void Shutdown();
+
+    void Start();
+    void Stop();
+    void SwitchMode(ProcessingMode m);
+    void RequestRestartInput();
+    bool ReopenInputStream();
+    bool SwitchToDevice(PaDeviceIndex newDev);
 private:
-    Settings& cfg = Settings::GetInstance();
+    Settings& cfg = Settings::GetInstance();    
+    void WorkerLoop();
+    void ProcessBuffer_Final(const std::vector<int16_t>& buffer);
+    void ProcessBuffer_Partial(const std::vector<int16_t>& buffer);
 
     // silence detection settings
     #define SILENCE_THRESHOLD cfg.get<int>("silence_threshold", 200)       // amplitude threshold
@@ -40,7 +58,15 @@ private:
     nlohmann::json j_result;
     int framesPerBuffer;
     double sampleRate;
-    int Run();
+
+    std::thread workerThread;
+    std::atomic<bool> workerRunning{false};
+    std::atomic<bool> restartRequested{false};
+    std::condition_variable controlCv;
+    std::mutex streamMutex;
+    std::atomic<ProcessingMode> currentMode{ProcessingMode::FinalOnSilence};
+
+    std::mutex tts_mtx;
 };
 
 class InputVisualizer {

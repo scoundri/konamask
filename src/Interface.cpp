@@ -532,54 +532,44 @@ void SpeechToText::render() {
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 220);
     ImGui::SetCursorPosY(13.5f);
-    if (ImGui::Button("Restart backend", ImVec2(100,28))) {
-        if (selected_pa_device >= 0) {
-            if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device))) {
-                std::cerr << "[ERROR] Restart input failed!" << std::endl;
-            }
-        } else {
-            if (!ReopenStream(paNoDevice)) {
-                std::cerr << "[ERROR] Restart input failed!" << std::endl;
-            }
+    if (stt.workerRunning.load()) {
+        if (ImGui::Button("Restart backend", ImVec2(108,28))) {
+            stt.Stop();
+            stt.Start();
+        }
+    } else { ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true); ImGui::Button("Restart backend", ImVec2(108,28)); ImGui::PopItemFlag(); }
+    // ImGui::SameLine();
+    ImGui::SetCursorPosY(13.5f);
+    if (workerRunning.load()) {
+        if (ImGui::Button("Stop backend", ImVec2(100,28))) {
+            stt.Stop();
+        }
+    } else {
+        if (ImGui::Button("Start backend", ImVec2(100,28))) {
+            stt.Start();
         }
     }
-    // if (ImGui::Button("Restart backend", ImVec2(100,28))) {
-    //     if (selected_pa_device >= 0) {
-    //         if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device))) {
-    //             std::cerr << "[ERROR] Restart input failed!" << std::endl;
-    //         }
-    //     } else {
-    //         if (!ReopenStream(paNoDevice)) {
-    //             std::cerr << "[ERROR] Restart input failed!" << std::endl;
-    //         }
-    //     }
-    // }
-    // ImGui::SameLine();
-    // ImGui::SetCursorPosY(13.5f);
-    // if (stopRequested.load()) {
-    //     if (ImGui::Button("Start backend", ImVec2(100,28))) {
-    //         if (ReopenStream()) {
-    //             Run();
-    //         } else {
-    //             std::cout << "[ERROR] Failed to start Speech-To-Text backend (could not re-open stream)!" << std::endl;
-    //         }
-    //     }
-    // } else {
-    //     if (ImGui::Button("Stop backend", ImVec2(100,28))) {
-    //         stopRequested.store(true);
-    //     }
-    // }
     ImGui::EndChild();
 
     ImGui::BeginChild("##STT_CONF", ImVec2(0, ImGui::GetWindowHeight()-62), true);
 
+    ImGui::SeparatorText("Mode:");
+    if (ImGui::RadioButton("Final-on-Silence", (int*)&stt.currentMode, (int)ProcessingMode::FinalOnSilence)) {
+        stt.SwitchMode(ProcessingMode::FinalOnSilence);
+    }
+    if (ImGui::RadioButton("Incremental Partial", (int*)&stt.currentMode, (int)ProcessingMode::IncrementalPartial)) {
+        stt.SwitchMode(ProcessingMode::IncrementalPartial);
+    }
+    ImGui::TextDisabled("Final-on-Silence - Submit content on the end of the sentence.\nIncremental Partial - Submit word-after-word.");
+    
+    ImGui::Dummy(ImVec2(0,20));
     // input device chooser
     ImGui::SeparatorText("Input Devices");
-    if (ImGui::Button("refresh device list")) {
+    if (ImGui::Button("Refresh list")) {
         populate_pa_device_list();
     }
     ImGui::SameLine();
-    if (ImGui::Button("select default")) {
+    if (ImGui::Button("Select default")) {
         PaDeviceIndex def = Pa_GetDefaultInputDevice();
         selected_pa_device = (def == paNoDevice) ? -1 : static_cast<int>(def);
     }
@@ -593,9 +583,9 @@ void SpeechToText::render() {
         std::vector<const char*> items;
         items.reserve(pa_device_labels.size());
         for (auto &s : pa_device_labels) items.push_back(s.c_str());
-        ImGui::Combo("pa device", &combo_idx, items.data(), static_cast<int>(items.size()));
+        ImGui::Combo("input device", &combo_idx, items.data(), static_cast<int>(items.size()));
         selected_pa_device = pa_device_indices[combo_idx];
-        ImGui::Text("selected device id: %d", selected_pa_device);
+        ImGui::Text("Selected device id: %d", selected_pa_device);
     }
     
 
@@ -609,7 +599,7 @@ void SpeechToText::render() {
     if (ImGui::SliderInt("silence threshold", &conf_threshold, 1, 30000)) {
         cfg.set<int>("silence_threshold", conf_threshold);
     }
-    if (ImGui::SliderInt("silence timeout ms", &conf_timeout, 100, 5000)) {
+    if (ImGui::SliderInt("silence timeout (ms)", &conf_timeout, 100, 5000)) {
         cfg.set<int>("silence_timeout", conf_timeout);
     }
     if (ImGui::InputDouble("buffer factor", &buffactor)) {
@@ -618,10 +608,10 @@ void SpeechToText::render() {
     }
     ImGui::Text("Current framesPerBuffer: %d", framesPerBuffer);
 
-    if (ImGui::Button("Apply buffer (restart backend)")) {
-        if (!ReopenStream(static_cast<PaDeviceIndex>(selected_pa_device >= 0 ? selected_pa_device : paNoDevice))) {
-            std::cerr << "[ERROR] Failed to apply buffer change\n";
-        }
+    if (ImGui::Button("Apply new input buffer")) {
+        std::cout << "[INFO] Backend input switch requested!" << std::endl;
+        stt.RequestRestartInput();
+        std::cout << "[INFO] Backend input switched!" << std::endl;
     }
 
     ImGui::EndChild();
@@ -2182,18 +2172,16 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::SetCursorPosY(10.0f);
         ImGui::PushFont(f_iconData); ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0,0));
         if (ImGui::Button("9", ImVec2(28.0f, 28.0f))) {
-        if (!Shutdown(surface)) {
-                std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
-                Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
-                std::exit(EXIT_FAILURE);
+            cfg.SaveToFile(cfg.logpath);
+            if (!Shutdown(surface)) {
+                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+                    Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
+                    std::exit(EXIT_FAILURE);
+                }
             }
-        }
         ImGui::PopFont(); ImGui::PopStyleVar();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Quit koncloak");
         
-        // search
-        ImGui::SetCursorPosX(fb_width - (518.0f));
-        ImGui::SetCursorPosY(8.5f);
         ImGui::PushItemWidth(200.0f);
         ImGui::PopItemWidth();
         ImGui::EndChild();
@@ -2216,7 +2204,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::EndChild();
         ImGui::SameLine();
 
-        ImGui::BeginChild("##CONF", ImVec2( sidebar_size, 0), false, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("##configuration", ImVec2( sidebar_size, 0), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
         switch (c_tab) {
             case OVERVIEW_TAB:
                 stt.render();
@@ -2226,10 +2214,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::BeginChild("##title_header_tts", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
                 ImGui::SetCursorPosX(16);
                 ImGui::SetCursorPosY(20.8f);
-                ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT MANAGEMENT");
+                ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "OUTPUT MANAGEMENT");
                 ImGui::EndChild();
 
-                ImGui::BeginChild("Manual Input Tab", ImVec2(0, ImGui::GetWindowHeight()-62), true);
+                ImGui::BeginChild("##tts_content", ImVec2(0, ImGui::GetWindowHeight()-62), true);
 
                 ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(20.0f);
                 ImGui::PushFont(f_iconData); 
@@ -2246,10 +2234,17 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             break;
 
             case LOG_TAB:
+                ImGui::BeginChild("##title_header_log", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
+                ImGui::SetCursorPosX(16);
+                ImGui::SetCursorPosY(20.8f);
+                ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "LOG");
+                ImGui::SameLine();
+                ImGui::SetCursorPosX(ImGui::GetWindowWidth()-ImGui::CalcTextSize("OPEN LOG FILE").x-24);
+                ImGui::SetCursorPosY(20.8f);
+                ImGui::TextLinkOpenURL("OPEN LOG FILE", cfg.logpath);
+                ImGui::EndChild();
 
-                ImGui::SetCursorPosX(20.0f);
-                ImGui::SetCursorPosY(0.0f);
-                ImGui::BeginChild("Log Tab", ImVec2(ImGui::GetWindowWidth()-20, -(ImGui::GetFrameHeightWithSpacing()+10.0f)), false, ImGuiWindowFlags_NoBackground);
+                ImGui::BeginChild("##log_content", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()-62), false);
                 ImGui::SetCursorPosY(20.0f);
                 logFile = ReadFileToString();
                 ImGui::TextWrapped("%s", logFile.c_str());
@@ -2257,9 +2252,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             break;
 
             case SETTINGS_TAB:
-                ImGui::SetCursorPosX(20.0f);
-                ImGui::SetCursorPosY(0.0f);
-                ImGui::BeginChild("Settings Tab", ImVec2(0, ImGui::GetWindowHeight()), true, ImGuiWindowFlags_NoBackground);
+                ImGui::BeginChild("##title_header_cfg", ImVec2(0, 54), false, ImGuiWindowFlags_NoScrollbar);
+                ImGui::SetCursorPosX(16);
+                ImGui::SetCursorPosY(20.8f);
+                ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "MISCELLANEOUS SETTINGS");
+                ImGui::EndChild();
+            
+                ImGui::BeginChild("##cfg_content", ImVec2(0, ImGui::GetWindowHeight()-62), true);
                 ImGui::SetCursorPosY(20.0f);
                 if (imgbg) { 
                     ImGui::Text("Change background image:");
@@ -2307,24 +2306,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::Text("Add custom fonts:");
                 ImGui::InputText("Font (.ttf) path", const_cast<char*>(fontdir.c_str()), fontdir.capacity()+1, flags, ResizeCallback, (void*)&fontdir); ImGui::Spacing();
                 ImGui::InputInt("Font size", (int*)&fontsize);
-                ImGui::SeparatorText("text-to-speech");
-                ImGui::Text("Voicebank");
-                ImGui::InputText("Voicebank name", const_cast<char*>(voicebank.c_str()), voicebank.capacity()+1, flags, ResizeCallback, (void*)&voicebank); ImGui::Spacing();
-                ImGui::Text("Voice variables");
-                ImGui::InputInt("Speech rate", (int*)&sr);
-                ImGui::InputInt("Speech pitch", (int*)&sp);
-                ImGui::InputInt("Speech volume", (int*)&sv); ImGui::Spacing();
-                ImGui::SeparatorText("speech-to-text");
-                ImGui::Text("Vosk-API model");
-                ImGui::InputText("Folder path", const_cast<char*>(voskapi.c_str()), voskapi.capacity()+1, flags, ResizeCallback, (void*)&voskapi); ImGui::Spacing();
-                ImGui::Text("Detection values");
-                ImGui::InputInt("Silence threshold", (int*)&sthreshold);
-                ImGui::InputInt("Silence timeout", (int*)&stimeout);
-                ImGui::SeparatorText("advanced parameters");
-                ImGui::Text("Do not change - unless you know, what you're doing."); ImGui::Spacing();
-                ImGui::InputInt("PulseAudio sample rate", (int*)&pasamplerate);
-                ImGui::InputDouble("PortAudio buffer factor", (double*)&bufferfactor); ImGui::Spacing();
-                ImGui::SeparatorText("");
                 if (ImGui::Button("Save")) {
                     std::cout << "[INFO] Saving settings..." << std::endl;
                     Logger::GetInstance().log("[INFO] Saving settings...");
@@ -2360,40 +2341,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                         std::cout << "[ERROR] Unable to update theme color configuration! Skipping..." << std::endl; 
                         Logger::GetInstance().log("[ERROR] Unable to update theme color configuration! Skipping...\n");
                     }
-                    try {
-                        cfg.set<int>("speech_rate", sr);
-                        cfg.set<int>("speech_pitch", sp);
-                        cfg.set<int>("speech_volume", sv);
-                        cfg.set<std::string>("speech_vociebank", voicebank);
-                        std::cout << "[INFO] Text-to-speech configuration updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Text-to-speech configuration updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update text-to-speech configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update text-to-speech configuration! Skipping...\n"); 
-                    }
-                    try {
-                        cfg.set<int>("silence_threshold", sthreshold);
-                        cfg.set<int>("silence_timeout", stimeout);
-                        cfg.set<std::string>("voskapi_model_path", voskapi);
-                        std::cout << "[INFO] Speech-to-text configuration updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Speech-to-text configuration updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update speech-to-text configuration! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update speech-to-text configuration! Skipping...\n");
-                    }
-                    try {
-                        cfg.set<int>("pa_sample_spec_rate", pasamplerate);
-                        cfg.set<int>("buffer_factor", bufferfactor);
-                        std::cout << "[INFO] Advanced settings updated successfully!" << std::endl;
-                        Logger::GetInstance().log("[INFO] Advanced settings updated successfully!\n");
-                    } 
-                    catch (...) {   
-                        std::cout << "[ERROR] Unable to update advanced settings! Skipping..." << std::endl; 
-                        Logger::GetInstance().log("[ERROR] Unable to update advanced settings! Skipping...\n");
-                    }
-
                     if (cfg.SaveToFile(config_path)) {
                         std::cout << "[INFO] Successfully applied all settings!" << std::endl;
                         Logger::GetInstance().log("[INFO] Successfully applied all settings!\n");
@@ -2409,7 +2356,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             break;
 
             case DEBUG_TAB:
-                ImGui::SetNextWindowBgAlpha(0.0f);
+                // ImGui::SetNextWindowBgAlpha(0.0f);
                 ImGui::SetNextWindowPos(ImVec2(fb_width/2.0f+20.0f, 63.0f));
                 ImGui::SetNextWindowSize(ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()));
                 ImGui::ShowDebugLogWindow();

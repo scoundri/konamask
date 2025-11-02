@@ -2432,7 +2432,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PushFont(f_iconData);  
         if (open&&sidebar_size<=-70) { 
             ImGui::PopFont(); 
-            if (ImGui::Button("Manual Input", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=MANUAL_INPUT_TAB; 
+            if (ImGui::Button("Output", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=MANUAL_INPUT_TAB; 
             ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(102.0f);
             ImGui::PushFont(f_iconData); 
             ImGui::Text("");

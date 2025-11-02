@@ -530,23 +530,23 @@ void SpeechToText::render() {
     ImGui::SetCursorPosY(20.8f);
     ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT MANAGEMENT");
     ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 220);
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 230);
     ImGui::SetCursorPosY(13.5f);
     if (stt.workerRunning.load()) {
         if (ImGui::Button("Restart backend", ImVec2(108,28))) {
-            stt.Stop();
-            stt.Start();
+            stt.PauseListening();
+            stt.ResumeListening();
         }
     } else { ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true); ImGui::Button("Restart backend", ImVec2(108,28)); ImGui::PopItemFlag(); }
-    // ImGui::SameLine();
+    ImGui::SameLine();
     ImGui::SetCursorPosY(13.5f);
-    if (workerRunning.load()) {
-        if (ImGui::Button("Stop backend", ImVec2(100,28))) {
-            stt.Stop();
+    if (paused.load()) {
+        if (ImGui::Button("Start backend", ImVec2(100,28))) {
+            stt.ResumeListening();
         }
     } else {
-        if (ImGui::Button("Start backend", ImVec2(100,28))) {
-            stt.Start();
+        if (ImGui::Button("Stop backend", ImVec2(100,28))) {
+            stt.PauseListening();
         }
     }
     ImGui::EndChild();
@@ -554,13 +554,13 @@ void SpeechToText::render() {
     ImGui::BeginChild("##STT_CONF", ImVec2(0, ImGui::GetWindowHeight()-62), true);
 
     ImGui::SeparatorText("Mode:");
-    if (ImGui::RadioButton("Final-on-Silence", (int*)&stt.currentMode, (int)ProcessingMode::FinalOnSilence)) {
+    if (ImGui::RadioButton("Submit-on-sentence", (int*)&stt.currentMode, (int)ProcessingMode::FinalOnSilence)) {
         stt.SwitchMode(ProcessingMode::FinalOnSilence);
     }
-    if (ImGui::RadioButton("Incremental Partial", (int*)&stt.currentMode, (int)ProcessingMode::IncrementalPartial)) {
+    if (ImGui::RadioButton("Word-for-word", (int*)&stt.currentMode, (int)ProcessingMode::IncrementalPartial)) {
         stt.SwitchMode(ProcessingMode::IncrementalPartial);
     }
-    ImGui::TextDisabled("Final-on-Silence - Submit content on the end of the sentence.\nIncremental Partial - Submit word-after-word.");
+    ImGui::TextDisabled("Submit-on-sentence: Submits content on the end of the sentence.\nWord-for-word: Submits each word seperately (for real-time speech) - experimental.");
     
     ImGui::Dummy(ImVec2(0,20));
     // input device chooser
@@ -2099,6 +2099,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         enum Tabs c_tab = OVERVIEW_TAB;
         bool open = false;
         short sidebar_size = -64;
+        visualizer.enabled.store(true);
 
     ImGuiFilePicker picker;
     std::string out_path;
@@ -2174,9 +2175,11 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         if (ImGui::Button("9", ImVec2(28.0f, 28.0f))) {
             cfg.SaveToFile(cfg.logpath);
             if (!Shutdown(surface)) {
+                    stt.Stop();
                     std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
                     Logger::GetInstance().log("[ERROR] (Vulkan/SDL2) Unable to shutdown properly!\n");
-                    std::exit(EXIT_FAILURE);
+                    visualizer.initialized.store(false);
+                    // std::exit(EXIT_FAILURE);
                 }
             }
         ImGui::PopFont(); ImGui::PopStyleVar();
@@ -2186,7 +2189,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PopItemWidth();
         ImGui::EndChild();
 
-        ImGui::BeginChild("##Visualisation", ImVec2(fb_width/2.0, 0), true);
+        ImGui::BeginChild("##Visualisation", ImVec2(fb_width/2.0, 0), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::SetCursorPosY(16.0f);
         ImGui::TextColored(ImVec4(0.86f,0.88f,0.92f,1.0f), "%s", "INPUT VISUALIZATION");
         visualizer.Process();
@@ -2194,6 +2197,21 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::SetCursorPosY(44.0f);
             ImGui::Separator();
             visualizer.render(&cfg);
+            ImGui::SetCursorPos(ImVec2(fb_width-ImGui::CalcTextSize("Stop graph rendering").x-2,fb_height-ImGui::CalcTextSize("Stop graph rendering").y-2));
+            if (ImGui::Button("Enable")) {
+                visualizer.enabled.store(true);
+            }
+        } else if (!visualizer.enabled.load()) {
+            ImGui::SetCursorPosY(44.0f);
+            ImGui::Separator();
+            ImGui::SetCursorPosX(ImGui::GetColumnWidth()/2-ImGui::CalcTextSize("Graph rendering is disabled").x/2);
+            ImGui::SetCursorPosY(fb_height/2.5f+10.0f);
+            ImGui::Text("Graph rendering is disabled.");
+            ImGui::SetCursorPosX(ImGui::GetColumnWidth()/2-ImGui::CalcTextSize("Enable").x/2);
+            if (ImGui::Button("Enable")) {
+                visualizer.enabled.store(true);
+            }
+
         } else {
             ImGui::SetCursorPosY(44.0f);
             ImGui::Separator();
@@ -2399,7 +2417,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PushFont(f_iconData);  
         if (open&&sidebar_size<=-70) { 
             ImGui::PopFont(); 
-            if (ImGui::Button("Overview", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=OVERVIEW_TAB; 
+            if (ImGui::Button("Input", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=OVERVIEW_TAB; 
             ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(62.0f);
             ImGui::PushFont(f_iconData); 
             ImGui::Text("#");

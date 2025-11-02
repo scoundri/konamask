@@ -35,13 +35,17 @@ public:
 
     void Start();
     void Stop();
-    void SwitchMode(ProcessingMode m);
+    void SwitchMode(ProcessingMode m) { currentMode.store(m); controlCv.notify_all(); };
     void RequestRestartInput();
     bool ReopenInputStream();
     bool SwitchToDevice(PaDeviceIndex newDev);
 private:
     Settings& cfg = Settings::GetInstance();    
+    void PauseListening();
+    void ResumeListening();
+    void RequestExit();
     void WorkerLoop();
+    void RecreateRecognizerLocked(double newSampleRate);
     void ProcessBuffer_Final(const std::vector<int16_t>& buffer);
     void ProcessBuffer_Partial(const std::vector<int16_t>& buffer);
 
@@ -59,10 +63,17 @@ private:
     int framesPerBuffer;
     double sampleRate;
 
+    int visFftSize = 2048;
+    int visRingSeconds = 2;
+
+    std::atomic<PaDeviceIndex> pendingDevice{paNoDevice};
     std::thread workerThread;
     std::atomic<bool> workerRunning{false};
     std::atomic<bool> restartRequested{false};
+    std::atomic<bool> exitRequested{false};
+    std::atomic<bool> paused{false};
     std::condition_variable controlCv;
+    std::condition_variable exitCv;
     std::mutex streamMutex;
     std::atomic<ProcessingMode> currentMode{ProcessingMode::FinalOnSilence};
 
@@ -84,7 +95,8 @@ public:
 
     int getSampleRate() const { return sr; }
     int getFFTSize() const { return N; }
-    bool initialized=false;
+    std::atomic<bool> initialized;
+    std::atomic<bool> enabled;
 private:
     std::vector<int16_t> ring;
     size_t ringMask = 0;

@@ -96,14 +96,14 @@ Settings& cfg = Settings::GetInstance();
         persist_module_id(id1);
         std::cout << "[INFO] loaded null-sink module id=" << id1 << std::endl;
     }
-
+    
     // load remap source (virtual microphone), points at VirtualSink.monitor
     int id2 = pactl_load_module_get_id("module-remap-source source_name=konamask master=VirtualSink.monitor source_properties=device.description=konamask");
     if (id2 <= 0) {
         std::cerr << "[ERROR] Failed to load module-remap-source!" << std::endl;
     } else {
         persist_module_id(id2);
-        std::cout << "[INFO] Koaded remap-source module id=" << id2 << std::endl;
+        std::cout << "[INFO] Loaded remap-source module id=" << id2 << std::endl;
     }
 
     // create virtual microphone

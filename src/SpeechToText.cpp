@@ -12,12 +12,26 @@
 
 InputVisualizer visualizer;
 
+void SpeechToText::RecreateRecognizerLocked(double newSampleRate) {
+    if (recognizer) {
+        vosk_recognizer_free(recognizer);
+        recognizer = nullptr;
+    }
+    recognizer = vosk_recognizer_new(model, static_cast<float>(newSampleRate));
+    if (recognizer) {
+        vosk_recognizer_set_max_alternatives(recognizer, 0);
+        vosk_recognizer_set_words(recognizer, true);
+    } else {
+        std::cerr << "[ERROR] RecreateRecognizerLocked: vosk_recognizer_new failed (sr=" << newSampleRate << ")" << std::endl;
+    }
+}
+
 int SpeechToText::Initialize() {
 
     std::cout << "\n>─────────────────────[INITIALIZING SPEECH-TO-TEXT]─────────────────────<\n" << std::endl;
     // initialize vosk api
     vosk_set_log_level(0);
-
+    visualizer.initialized.store(false);
     
     model = vosk_model_new(cfg.get<std::string>("voskapi_model_path", "./model").c_str());
     if (!model) {
@@ -42,63 +56,114 @@ int SpeechToText::Initialize() {
     std::cout << "[INFO] Buffer factor has been set to  \"" << cfg.get<double>("buffer_factor", 0.05) << "\"." << std::endl;
     std::cout << "[INFO] Using input device: " << devInfo->name << " @" << sampleRate << "Hz" << std::endl;
 
-    recognizer = vosk_recognizer_new(model, sampleRate);
-    vosk_recognizer_set_max_alternatives(recognizer, 0);
-    vosk_recognizer_set_words(recognizer, true);
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
 
-    PaStreamParameters inputParams;
-    inputParams.device = dev;
-    inputParams.channelCount = 1;
-    inputParams.sampleFormat = paInt16;
-    inputParams.suggestedLatency = devInfo->defaultLowInputLatency;
-    inputParams.hostApiSpecificStreamInfo = nullptr;
+        // - lower-case comment: create recognizer for the chosen sampleRate
+        if (recognizer) {
+            vosk_recognizer_free(recognizer);
+            recognizer = nullptr;
+        }
+        recognizer = vosk_recognizer_new(model, static_cast<float>(sampleRate));
+        if (!recognizer) {
+            std::cerr << "[ERROR] Failed to create recognizer (sr=" << sampleRate << ")\n";
+            return 1;
+        }
+        vosk_recognizer_set_max_alternatives(recognizer, 0);
+        vosk_recognizer_set_words(recognizer, true);
 
-    if (Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate,
-                      framesPerBuffer, paNoFlag, nullptr, nullptr) != paNoError) {
-        std::cerr << "[INFO] Failed to open stream!" << std::endl;
-        return 1;
-    }
-    Pa_StartStream(stream);
-    std::cout << "[INFO] Successfully oppened the PortAudio stream!" << std::endl;
+        // - lower-case comment: open the PortAudio input stream and start it
+        PaStreamParameters inputParams;
+        inputParams.device = dev;
+        inputParams.channelCount = 1;
+        inputParams.sampleFormat = paInt16;
+        inputParams.suggestedLatency = devInfo->defaultLowInputLatency;
+        inputParams.hostApiSpecificStreamInfo = nullptr;
 
+        PaError err = Pa_OpenStream(&stream, &inputParams, nullptr, sampleRate,
+                                    static_cast<unsigned long>(framesPerBuffer),
+                                    paNoFlag, nullptr, nullptr);
+        if (err != paNoError) {
+            std::cerr << "[ERROR] Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
+            stream = nullptr;
+            return 1;
+        }
+        err = Pa_StartStream(stream);
+        if (err != paNoError) {
+            std::cerr << "[ERROR] Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
+            Pa_CloseStream(stream);
+            stream = nullptr;
+            return 1;
+        }
+    } // unlock streamMutex
+
+    // - lower-case comment: init visualizer if UI requested (no lock needed; it uses its own internals)
     if (cfg.get<bool>("enable_user_interface", true)) {
-        int fftSize = 2048; // tune if you like
-        int ringSec = 2;
-        if (!visualizer.Initialize(static_cast<int>(sampleRate), fftSize, ringSec)) {
+        visFftSize = 2048;               // - lower-case note: feel free to make configurable
+        visRingSeconds = 2;
+        if (!visualizer.Initialize(static_cast<int>(sampleRate), visFftSize, visRingSeconds)) {
             std::cerr << "[ERROR] Failed to initialize input visualizer" << std::endl;
         } else {
-            std::cout << "[INFO] input visualizer initialized (sr=" << sampleRate << " fft=" << fftSize << ")" << std::endl;
+            std::cout << "[INFO] input visualizer initialized (sr=" << sampleRate
+                      << " fft=" << visFftSize << " ring=" << visRingSeconds << "s)" << std::endl;
         }
     }
 
-    std::cout << "\n>────────────────[INITIALIZED SPEECH-TO-TEXT SUCCESSULLY]───────────────<\n" << std::endl;
+    // - lower-case comment: clear control flags & start worker thread (non-blocking)
+    paused.store(false);
+    restartRequested.store(false);
+    pendingDevice.store(paNoDevice);
+    currentMode.store(ProcessingMode::IncrementalPartial); // or FinalOnSilence, depends on default you want
+
     Start();
     return 0;
 }
 
 void SpeechToText::Start() {
-    if (workerRunning.exchange(true)) {
-        return;
-    }
-
+    if (workerRunning.exchange(true)) return;
     if (workerThread.joinable()) {
-        try {
-            workerThread.join();
-        } catch (...) {
-        }
+        try { workerThread.join(); } catch(...) {}
     }
-
     try {
-        workerThread = std::thread(&SpeechToText::WorkerLoop, this);
+        WorkerLoop();
     } catch (...) {
-        try {
-            WorkerLoop();
-        } catch (...) { 
-            workerRunning.store(false);
-            Shutdown();
-            throw "worker thread (SpeechToText::workerThread) threw inside SpeechToText::Start()";
+        workerRunning.store(false);
+        throw std::runtime_error("failed to create worker thread");
+    }
+}
+
+void SpeechToText::PauseListening() {
+    paused.store(true);
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
+        if (stream) {
+            PaError e = Pa_IsStreamActive(stream);
+            (void)e;
+            Pa_AbortStream(stream);
+            Pa_StopStream(stream);
+            Pa_CloseStream(stream);
+            stream = nullptr;
         }
     }
+    controlCv.notify_all();
+}
+
+void SpeechToText::ResumeListening() {
+    paused.store(false);
+    restartRequested.store(true);
+    controlCv.notify_all();
+}
+
+void SpeechToText::RequestExit() {
+    exitRequested.store(true);
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
+        if (stream) {
+            Pa_AbortStream(stream);
+        }
+    }
+    controlCv.notify_all();
+    exitCv.notify_all();
 }
 
 bool SpeechToText::ReopenInputStream() {
@@ -259,18 +324,19 @@ bool SpeechToText::SwitchToDevice(PaDeviceIndex newDev) {
     PaError err = Pa_OpenStream(&stream, &inParams, nullptr, sampleRate,
                                static_cast<unsigned long>(framesPerBuffer), paNoFlag, nullptr, nullptr);
     if (err != paNoError) {
-        std::cerr << "[ERROR] switchToDevice: Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
+        std::cerr << "[ERROR] SwitchToDevice: Pa_OpenStream failed: " << Pa_GetErrorText(err) << std::endl;
         stream = nullptr;
         return false;
     }
     err = Pa_StartStream(stream);
     if (err != paNoError) {
-        std::cerr << "[ERROR] switchToDevice: Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
+        std::cerr << "[ERROR] SwitchToDevice: Pa_StartStream failed: " << Pa_GetErrorText(err) << std::endl;
         Pa_CloseStream(stream);
         stream = nullptr;
         return false;
     }
-    std::cout << "[INFO] switched to device '" << (di->name?di->name:"unknown") << "' sr=" << sampleRate << std::endl;
+    RecreateRecognizerLocked(sampleRate); // remove later
+    std::cout << "[INFO] Switched to device '" << (di->name?di->name:"unknown") << "' sr=" << sampleRate << std::endl;
     return true;
 }
 
@@ -278,14 +344,24 @@ bool SpeechToText::SwitchToDevice(PaDeviceIndex newDev) {
 void SpeechToText::Stop() {
     if (!workerRunning.load()) return;
     workerRunning.store(false);
-    controlCv.notify_all();
-    if (workerThread.joinable()) workerThread.join();
-}
 
-void SpeechToText::SwitchMode(ProcessingMode m) {
-    currentMode.store(m);
-    // wake worker
-    controlCv.notify_one();
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
+        if (stream) {
+            PaError e = Pa_IsStreamActive(stream);
+            (void)e;
+            Pa_AbortStream(stream);
+            Pa_StopStream(stream);
+            Pa_CloseStream(stream);
+            stream = nullptr;
+        }
+    }
+
+    controlCv.notify_all();
+
+    // if (workerThread.joinable()) {
+    //     try { workerThread.join(); } catch(...) {}
+    // }
 }
 
 void SpeechToText::RequestRestartInput() {
@@ -294,77 +370,100 @@ void SpeechToText::RequestRestartInput() {
 }
 
 void SpeechToText::WorkerLoop() {
-    // local buffers
     std::vector<int16_t> buffer;
-    buffer.resize(framesPerBuffer);
-
-    std::string lastPartial;
-    size_t lastSpokenCount = 0;
+    {
+        std::lock_guard<std::mutex> lk(streamMutex);
+        if (framesPerBuffer <= 0) framesPerBuffer = 512;
+        buffer.resize(framesPerBuffer);
+    }
 
     int backoffMs = 50;
     const int maxBackoffMs = 5000;
 
-    auto split_words = [](const std::string &s) {
-        std::vector<std::string> w;
-        std::istringstream iss(s);
-        std::string tok;
-        while (iss >> tok) w.push_back(tok);
-        return w;
-    };
-
+    visualizer.initialized.store(true);
     while (workerRunning.load()) {
-        // restart request handling
-        if (restartRequested.load()) {
+        if (paused.load()) {
             std::unique_lock<std::mutex> lk(streamMutex);
-            if (!stream || Pa_IsStreamActive(stream) <= 0) {
-                lk.unlock();
-                if (!ReopenInputStream()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
-                    backoffMs = std::min(maxBackoffMs, backoffMs * 2);
-                    continue;
-                }
-            backoffMs = 50;
-            }
+            controlCv.wait_for(lk, std::chrono::milliseconds(200), [&](){
+                return !workerRunning.load() || !paused.load() || restartRequested.load();
+            });
         }
-        PaError err;
+
+        bool need_reopen_now = false;
         {
             std::lock_guard<std::mutex> lk(streamMutex);
-            if (!stream) { continue; }
-            err = Pa_ReadStream(stream, buffer.data(), static_cast<unsigned long>(framesPerBuffer));
-            if (err && err != paInputOverflowed) {
-            std::cerr << "[ERROR] Pa_ReadStream returned " << err << " (" << Pa_GetErrorText(err) << ")" << std::endl;
-        
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        
-            // try auto-discovery of a working device
-            PaDeviceIndex wokring = findWorkingDeviceAuto(static_cast<unsigned long>(framesPerBuffer), sampleRate);
-            if (wokring != paNoDevice) {
-                std::cout << "[INFO] Auto-found working device: " << wokring << " - switching..." << std::endl;
-                if (SwitchToDevice(wokring)) {
-                    continue; // attempt next read on new device
-                } else {
-                    std::cerr << "[ERROR] Failed to switch to auto-found device!" << std::endl;
-                }
+            need_reopen_now = (stream == nullptr);
+        }
+        if (restartRequested.load() || need_reopen_now) {
+            restartRequested.store(false);
+            if (!ReopenInputStream()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
+                backoffMs = std::min(maxBackoffMs, backoffMs * 2);
+                continue;
             }
-        
+
+            {
+                std::lock_guard<std::mutex> lk(streamMutex);
+                buffer.resize(framesPerBuffer);
+            }
+            backoffMs = 50;
+        }
+
+        PaDeviceIndex pending = pendingDevice.load();
+        if (pending != paNoDevice) {
+            if (SwitchToDevice(pending)) {
+                pendingDevice.store(paNoDevice);
+                // resize local buffer after change
+                std::lock_guard<std::mutex> lk(streamMutex);
+                buffer.resize(framesPerBuffer);
+            } else {
+                pendingDevice.store(paNoDevice);
             }
         }
 
+        PaError err = paNoError;
+        {
+            std::lock_guard<std::mutex> lk(streamMutex);
+            if (!stream) {
+                // possible race, request reopen next loop
+                restartRequested.store(true);
+                continue;
+            }
+            err = Pa_ReadStream(stream, buffer.data(), static_cast<unsigned long>(framesPerBuffer));
+        }
+
+        if (err == paInputOverflowed) {
+            std::fill(buffer.begin(), buffer.end(), 0);
+        } else if (err != paNoError) {
+            std::cerr << "[ERROR] Pa_ReadStream returned " << err << " (" << Pa_GetErrorText(err) << ")\n";
+            std::lock_guard<std::mutex> lk(streamMutex);
+            if (stream) { Pa_AbortStream(stream); Pa_StopStream(stream); Pa_CloseStream(stream); stream = nullptr; }
+            restartRequested.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
+            backoffMs = std::min(maxBackoffMs, backoffMs * 2);
+            continue;
+        }
+
+        backoffMs = 50;
 
         visualizer.PushSamples(buffer.data(), buffer.size());
 
-        // dispatch
         ProcessingMode mode = currentMode.load();
-        if (mode == ProcessingMode::FinalOnSilence) { // call handler
+        if (mode == ProcessingMode::FinalOnSilence) {
             ProcessBuffer_Final(buffer);
         } else {
             ProcessBuffer_Partial(buffer);
         }
-        std::unique_lock<std::mutex> lk(streamMutex);
-        controlCv.wait_for(lk, std::chrono::milliseconds(1), [&](){ return !workerRunning.load() || restartRequested.load() || false;});
+
+        {
+            std::unique_lock<std::mutex> lk(streamMutex);
+            controlCv.wait_for(lk, std::chrono::milliseconds(1), [&]() {
+                return !workerRunning.load() || restartRequested.load() || paused.load();
+            });
+        }
+
     }
 
-    // final cleanup
     {
         std::unique_lock<std::mutex> lk(streamMutex);
         if (stream) {
@@ -374,7 +473,6 @@ void SpeechToText::WorkerLoop() {
         }
     }
 }
-
 void SpeechToText::ProcessBuffer_Final(const std::vector<int16_t>& buffer) {
     // feed recognizer
     vosk_recognizer_accept_waveform(recognizer,
@@ -391,6 +489,7 @@ void SpeechToText::ProcessBuffer_Final(const std::vector<int16_t>& buffer) {
         if (!inSpeech) {
             inSpeech = true;
             vosk_recognizer_reset(recognizer); // reset on new speech
+            silenceStart = std::chrono::steady_clock::now();
         }
     } else if (inSpeech) {
         // start timer or finalize
@@ -409,8 +508,6 @@ void SpeechToText::ProcessBuffer_Final(const std::vector<int16_t>& buffer) {
             }
             inSpeech = false;
         }
-    } else {
-        silenceStart = std::chrono::steady_clock::now();
     }
 }
 
@@ -427,31 +524,58 @@ void SpeechToText::ProcessBuffer_Partial(const std::vector<int16_t>& buffer) {
     try {
         auto pj = nlohmann::json::parse(partial_c);
         std::string ptxt = pj.value("partial", std::string());
-        // split words
-        static std::vector<std::string> spokenWords;
-        // if ptxt shorter than previous, assume recognizer backtracked -> clear
-        if (ptxt.size() < std::accumulate(spokenWords.begin(), spokenWords.end(), 0,
-                                          [](int a, const std::string &s){ return a + (int)s.size() + 1; })) {
-            spokenWords.clear();
-        }
+        if (ptxt.empty()) return;
+
+        // split words (simple whitespace tokenizer)
         std::istringstream iss(ptxt);
         std::vector<std::string> words;
         std::string w;
-        while (iss >> w) words.push_back(w);
-
-        // speak new input (words)
-        size_t already = spokenWords.size();
-        if (words.size() > already) {
-            for (size_t i = already; i < words.size(); ++i) {
-                std::lock_guard<std::mutex> lk(tts_mtx);
-                TextToSpeech::Verbalize(words[i].c_str());
+        while (iss >> w) {
+            // optional: trim punctuation from ends so "word," != "word"
+            // remove leading/trailing punctuation common cases
+            size_t start = 0, end = w.size();
+            while (start < end && !std::isalnum(static_cast<unsigned char>(w[start]))) ++start;
+            while (end > start && !std::isalnum(static_cast<unsigned char>(w[end-1]))) --end;
+            if (start == 0 && end == w.size()) {
+                words.push_back(w);
+            } else if (start < end) {
+                words.emplace_back(w.substr(start, end - start));
+            } else {
+                // token had no alnum chars; skip it
             }
-            spokenWords = words;
         }
+
+        static std::vector<std::string> spokenWords; // tokens we've already verbalized
+
+        // find longest common prefix length between spokenWords and current words
+        size_t cp = 0;
+        size_t minsz = std::min(spokenWords.size(), words.size());
+        while (cp < minsz && spokenWords[cp] == words[cp]) ++cp;
+
+        // if the current partial has backtracked (cp < spokenWords.size()), drop those spokenWords
+        if (cp < spokenWords.size()) {
+            // previously spoken tokens no longer match current partial -> forget them
+            spokenWords.clear();
+        }
+
+        // speak only the new suffix (words[cp .. end-1])
+        for (size_t i = cp; i < words.size(); ++i) {
+            const std::string &token = words[i];
+            if (token.empty()) continue;
+            // lock around TTS call
+            {
+                std::lock_guard<std::mutex> lk(tts_mtx);
+                TextToSpeech::Verbalize(token.c_str());
+            }
+        }
+
+        // update spokenWords to current words (we consider them all "spoken" for future diffs)
+        spokenWords = words;
     } catch (...) {
-        // ignore errors
+        // ignore JSON / parsing / other errors gracefully
     }
 }
+
 
 void SpeechToText::Shutdown() {
     Stop();

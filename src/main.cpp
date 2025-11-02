@@ -306,10 +306,10 @@ int main() {
     Logger::Initialize();
     if (cfg.get<bool>("enable_logging_to_file", false)) {
         std::cout << "[INFO] Logger has been enabled!" << std::endl;
-        Logger::GetInstance().log("\n\n\n\n\n\n\n\n>--------------------[KONAMASK STARTED @ ");
+        Logger::GetInstance().log("\nStarting konamask, developed by konacode...\n>--------------------[KONAMASK STARTED @ ");
             std::time_t t = std::time(nullptr); char b[20];
         Logger::GetInstance().log(now);
-        Logger::GetInstance().log("]>------------------------------------------------[<\n\n");
+        Logger::GetInstance().log("]>--------------------<\n\n");
     }
     //tts.Initialize();
     if (cfg.get<bool>("enable_user_interface", true)) {

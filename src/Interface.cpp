@@ -2262,7 +2262,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 ImGui::TextLinkOpenURL("OPEN LOG FILE", cfg.logpath);
                 ImGui::EndChild();
 
-                ImGui::BeginChild("##log_content", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()-62), false);
+                ImGui::BeginChild("##log_content", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight()-62), true);
                 ImGui::SetCursorPosY(20.0f);
                 logFile = ReadFileToString();
                 ImGui::TextWrapped("%s", logFile.c_str());
@@ -2447,7 +2447,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui::PushFont(f_iconData);  
         if (open&&sidebar_size<=-70) { 
             ImGui::PopFont(); 
-            if (ImGui::Button("Logs", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; 
+            if (ImGui::Button("Log", ImVec2(std::abs(sidebar_size)/1.2f,34.0f))) c_tab=LOG_TAB; 
             ImGui::SameLine(); ImGui::SetCursorPosX(20.0f); ImGui::SetCursorPosY(142.0f);
             ImGui::PushFont(f_iconData); 
             ImGui::Text("(");

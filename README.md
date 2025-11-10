@@ -1,54 +1,94 @@
-# konamask - a voice masking utility
-### (ReadMe version: Pre-Release 1.0)
-## In short:
-konamask is a (currently) **Linux-only** application that:
-1) captures microphone input,
-2) performs speech recognition (converts input to text),
-3) then outputs masked speech trough a virtual microphone.
 
-All manageable from a simple user interface.
+# konamask
 
-The goal is privacy: replace your voice in real time.
+  
 
-Included configuration and customizability of the voice `input`, `output` and `user interface` is simple and begginer friendly.
+**Konamask** is an offline voice-masking tool that **converts live microphone input into a generated (synthetic) voice** and exposes it through a virtual microphone.
+It is intended for use with communication apps (for example: Discord) where users want to avoid using their real voice.
 
-## Features
-- Speech-to-text (real-time voice recognition) (using Vosk-API) for fluid input.
-- Text-to-speech (voice output pipeline) for masking your voice.
-- GUI for control and masking configuration, selecting models, and tuning parameters.
-- System integration on Linux (PulseAudio / appindicator support) for minimal disruption while not in use.
+![Preview Image](https://shared.konacode.com/dump/github/konamask/konamask-preview-image.webp)
 
-## Required libraries
-these packages must be installed before building
-- Required for voice transformation: 
-`vosk-api`
-`portaudio`
-`libpulse`
-- Required for rendering: 
-`vulkan-headers`
-`sdl2`
-`stb`
-`imgui`
-- Miscellaneous: 
-`curl`
-`gtk3`
-`libappindicator-gtk3`
-`libayatana-appindicator`
+## Key features
 
-Note: the precise package names your distribution uses may differ slightly; see the platform-specific notes below.
+- Real-time voice masking (word-by-word or per sentence).
 
-## Platform notes & package availability
+- Virtual microphone output (so other apps receive only the generated audio).
 
-### Arch Linux (recommended / primary target)
+- Local/offline operation - no internet connection required for synthesis (uses local models).
+
+- Graphical user interface (Vulkan + ImGui) with:
+
+	- Input device selection and visualization (gain, smoothing, decay),
+
+	- manual text-to-speech output,
+
+	- adjustable voice parameters (rate, pitch, volume, voicebank),
+
+	- log viewer and debug tools.
+
+	- Backend control (start/stop/restart) for the speech recognition + synthesis pipeline.
+
+  
+
+## What it is *not*
+
+- Not a cloud service — everything runs locally.
+
+- Some languages are not yet implemented.
+>A list of supported languages can be found here:
+>https://alphacephei.com/en/
+
+
+  
+
+## Requirements (high-level)
+
+- Modern C++ toolchain (C++17 or newer)
+
+- Vulkan SDK (for GUI rendering)
+
+- ImGui (GUI library)
+
+- Offline speech models (e.g. VOSK-compatible models)
+
+- A virtual audio driver (virtual microphone, OS-specific)
+
+- Audio I/O library (e.g. PortAudio or equivalent) — implementation dependent
+
+  
+
+> If your Vulkan dependencies (SDK) don't link successfully (or you get a different graphics card related issue) for any reason, you can disable the graphical interface in the config.ini file (set `enable_user_interface = false`). 
+> 
+> *The configuration file is located at "/home/{username}/.config/konacode/config.ini".*
+
+  
+
+## Clean install & build
+
+```bash
+
+# clone the repository
+git  clone https://github.com/kona-code/konamask
+cd  konamask
+
+# install needed dependencies (you can do this manually too)
+sudo chmod 754 ./install_dependencies.sh
+sudo ./install_dependencies.sh
+
+# build the project
+make
+
+# run the program 
+# (all executable files can be found in the "output" directory of the repository)
+./konamask
+
 ```
-sudo pacman -S --needed vosk-api portaudio vulkan-headers curl stb gtk3 libpulse libayatana-appindicator sdl2
-```
-**SDL2** on Arch: the official repo may provide `sdl2-compat` to satisfy `sdl2` dependencies - check `pacman -Ss sdl2`.
+## Customization/Personalization
 
-### Debian / Ubuntu (example packages)
-```
-sudo apt install build-essential cmake pkg-config libsdl2-dev libgl1-mesa-dev libvulkan-dev vulkan-sdk libportaudio2 portaudio19-dev libpulse-dev libgtk-3-dev libayatana-appindicator3-dev libcurl4-openssl-dev libstb-dev libnlohmann-json-dev
-```
-On recent Ubuntu releases `libayatana-appindicator3-dev` is the package that replaces the older `libappindicator` development package. If you get dependency conflicts, select `libayatana-appindicator3-dev`.
+Most customizations can be made using the config file.
+I've added comments to the more "unusual" settings for clarity.
 
-**Vosk-API**: Vosk may not be packaged in all distributions. The upstream project documents installing language models and client bindings (Python) and offers sources; for system integration on Debian/Ubuntu you may need to build or install a Vosk dev package or use the provided pip/bindings.
+You can also change it from the GUI (it's not as reliable tho):
+
+![GUI configuration > TTS](https://shared.konacode.com/dump/github/konamask/konamask-configuration-01.webp )
+![GUI configuration > Core settings](https://shared.konacode.com/dump/github/konamask/konamask-configuration-02.webp)
